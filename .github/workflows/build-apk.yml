@@ -1,0 +1,56 @@
+name: Selam APK Oluştur
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "build.gradle"
+      - "settings.gradle"
+      - "gradle.properties"
+      - ".github/workflows/build-apk.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    name: Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Kaynak kodu al
+        uses: actions/checkout@v4
+
+      - name: Java 17 kur
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK kur
+        uses: android-actions/setup-android@v3
+
+      - name: Android 16 araçlarını kur
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+
+      - name: Gradle 9.5 kur
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.5.0"
+
+      - name: APK oluştur
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+
+      - name: APK dosyasını adlandır
+        run: cp app/build/outputs/apk/debug/app-debug.apk Selam.apk
+
+      - name: APK'yı indirilebilir yap
+        uses: actions/upload-artifact@v4
+        with:
+          name: Selam-APK
+          path: Selam.apk
+          if-no-files-found: error
+          retention-days: 30
