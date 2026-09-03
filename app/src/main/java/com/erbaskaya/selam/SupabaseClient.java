@@ -26,17 +26,24 @@ final class SupabaseClient {
         void onError(String message);
     }
 
-    static final class AuthResult {
-        final boolean signedIn;
-        final String message;
+    static final class Profile {
+        final String username;
+        final String displayName;
+        final String phoneLast4;
+        final String safetyCode;
+        final boolean ready;
 
-        AuthResult(boolean signedIn, String message) {
-            this.signedIn = signedIn;
-            this.message = message;
+        Profile(String username, String displayName, String phoneLast4,
+                String safetyCode, boolean ready) {
+            this.username = username;
+            this.displayName = displayName;
+            this.phoneLast4 = phoneLast4;
+            this.safetyCode = safetyCode;
+            this.ready = ready;
         }
     }
 
-    static final class Person {
+    static class Person {
         final String id;
         final String username;
         final String displayName;
@@ -48,18 +55,25 @@ final class SupabaseClient {
         }
     }
 
+    static final class ContactMatch extends Person {
+        final String matchedPhone;
+
+        ContactMatch(String id, String username, String displayName, String matchedPhone) {
+            super(id, username, displayName);
+            this.matchedPhone = matchedPhone;
+        }
+    }
+
     static final class Chat {
         final String id;
-        final String personId;
         final String username;
         final String displayName;
         final String lastMessage;
         final String lastMessageAt;
 
-        Chat(String id, String personId, String username, String displayName,
+        Chat(String id, String username, String displayName,
              String lastMessage, String lastMessageAt) {
             this.id = id;
-            this.personId = personId;
             this.username = username;
             this.displayName = displayName;
             this.lastMessage = lastMessage;
@@ -87,7 +101,7 @@ final class SupabaseClient {
     private static final String USER_ID = "user_id";
 
     private final String baseUrl = BuildConfig.SUPABASE_URL;
-    private final String anonKey = BuildConfig.SUPABASE_ANON_KEY;
+    private final String publishableKey = BuildConfig.SUPABASE_ANON_KEY;
     private final SharedPreferences preferences;
     private final ExecutorService executor = Executors.newCachedThreadPool();
 
@@ -97,7 +111,7 @@ final class SupabaseClient {
 
     boolean isConfigured() {
         return baseUrl != null && baseUrl.startsWith("https://")
-                && anonKey != null && !anonKey.trim().isEmpty();
+                && publishableKey != null && !publishableKey.trim().isEmpty();
     }
 
     boolean hasSession() {
@@ -108,50 +122,104 @@ final class SupabaseClient {
         return preferences.getString(USER_ID, "");
     }
 
-    void signIn(String email, String password, Callback<AuthResult> callback) {
+    void createDeviceSession(Callback<Boolean> callback) {
         executor.execute(() -> {
             try {
                 JSONObject payload = new JSONObject()
-                        .put("email", email.trim())
-                        .put("password", password);
-                Response response = request("POST", "/auth/v1/token?grant_type=password", null, payload);
+                        .put("data", new JSONObject())
+                        .put("gotrue_meta_security", new JSONObject());
+                Response response = request("POST", "/auth/v1/signup", null, payload);
                 if (!response.ok()) {
-                    callback.onError(authError(response));
+                    String detail = apiError(response);
+                    if (detail.toLowerCase().contains("anonymous")
+                            || detail.toLowerCase().contains("provider")) {
+                        detail = "Cihaz hesabı sunucuda etkin değil. Lütfen daha sonra tekrar deneyin.";
+                    }
+                    callback.onError(detail);
                     return;
                 }
-                JSONObject data = new JSONObject(response.body);
-                saveSession(data);
-                callback.onSuccess(new AuthResult(true, "Giriş başarılı."));
+                saveSession(new JSONObject(response.body));
+                callback.onSuccess(true);
             } catch (Exception exception) {
                 callback.onError(friendly(exception));
             }
         });
     }
 
-    void signUp(String email, String password, String username, String displayName,
-                Callback<AuthResult> callback) {
+    void getMyProfile(Callback<Profile> callback) {
         executor.execute(() -> {
             try {
-                JSONObject metadata = new JSONObject()
-                        .put("username", username.trim().toLowerCase())
-                        .put("display_name", displayName.trim());
+                Response response = authorizedRequest("POST", "/rest/v1/rpc/get_my_profile", new JSONObject());
+                ensureSuccess(response);
+                JSONArray array = new JSONArray(response.body);
+                if (array.length() == 0) throw new IOException("Profil bulunamadı.");
+                JSONObject item = array.getJSONObject(0);
+                callback.onSuccess(new Profile(
+                        item.optString("username"), item.optString("display_name"),
+                        item.optString("phone_last4"), item.optString("safety_code"),
+                        item.optBoolean("profile_ready")
+                ));
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void setupProfile(String displayName, String phoneE164, Callback<Profile> callback) {
+        executor.execute(() -> {
+            try {
                 JSONObject payload = new JSONObject()
-                        .put("email", email.trim())
-                        .put("password", password)
-                        .put("data", metadata);
-                Response response = request("POST", "/auth/v1/signup", null, payload);
-                if (!response.ok()) {
-                    callback.onError(authError(response));
-                    return;
+                        .put("new_display_name", displayName.trim())
+                        .put("phone_e164", phoneE164);
+                Response response = authorizedRequest("POST", "/rest/v1/rpc/setup_profile", payload);
+                ensureSuccess(response);
+                JSONArray array = new JSONArray(response.body);
+                if (array.length() == 0) throw new IOException("Profil oluşturulamadı.");
+                JSONObject item = array.getJSONObject(0);
+                callback.onSuccess(new Profile(
+                        item.optString("username"), item.optString("display_name"),
+                        item.optString("phone_last4"), item.optString("safety_code"), true));
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void matchContacts(List<String> phones, Callback<List<ContactMatch>> callback) {
+        executor.execute(() -> {
+            try {
+                JSONArray numbers = new JSONArray();
+                for (String phone : phones) numbers.put(phone);
+                JSONObject payload = new JSONObject().put("contact_phones", numbers);
+                Response response = authorizedRequest("POST", "/rest/v1/rpc/match_contacts", payload);
+                ensureSuccess(response);
+                JSONArray array = new JSONArray(response.body);
+                List<ContactMatch> matches = new ArrayList<>();
+                for (int i = 0; i < array.length(); i++) {
+                    JSONObject item = array.getJSONObject(i);
+                    matches.add(new ContactMatch(
+                            item.optString("user_id"), item.optString("username"),
+                            item.optString("display_name"), item.optString("matched_phone")
+                    ));
                 }
-                JSONObject data = new JSONObject(response.body);
-                if (data.optString("access_token").isEmpty()) {
-                    callback.onSuccess(new AuthResult(false,
-                            "Kayıt oluşturuldu. E-postanıza gelen doğrulama bağlantısını açıp giriş yapın."));
-                } else {
-                    saveSession(data);
-                    callback.onSuccess(new AuthResult(true, "Hesabınız hazır."));
-                }
+                callback.onSuccess(matches);
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void findInvite(String inviteCode, Callback<Person> callback) {
+        executor.execute(() -> {
+            try {
+                JSONObject payload = new JSONObject().put("invite_code", inviteCode.trim());
+                Response response = authorizedRequest("POST", "/rest/v1/rpc/find_invite", payload);
+                ensureSuccess(response);
+                JSONArray array = new JSONArray(response.body);
+                if (array.length() == 0) throw new IOException("QR kod geçersiz.");
+                JSONObject item = array.getJSONObject(0);
+                callback.onSuccess(new Person(item.optString("user_id"),
+                        item.optString("username"), item.optString("display_name")));
             } catch (Exception exception) {
                 callback.onError(friendly(exception));
             }
@@ -168,11 +236,8 @@ final class SupabaseClient {
                 for (int i = 0; i < array.length(); i++) {
                     JSONObject item = array.getJSONObject(i);
                     chats.add(new Chat(
-                            item.optString("conversation_id"),
-                            item.optString("other_user_id"),
-                            item.optString("username"),
-                            item.optString("display_name"),
-                            item.optString("last_message"),
+                            item.optString("conversation_id"), item.optString("username"),
+                            item.optString("display_name"), item.optString("last_message"),
                             item.optString("last_message_at")
                     ));
                 }
@@ -193,11 +258,8 @@ final class SupabaseClient {
                 List<Person> people = new ArrayList<>();
                 for (int i = 0; i < array.length(); i++) {
                     JSONObject item = array.getJSONObject(i);
-                    people.add(new Person(
-                            item.optString("user_id"),
-                            item.optString("username"),
-                            item.optString("display_name")
-                    ));
+                    people.add(new Person(item.optString("user_id"),
+                            item.optString("username"), item.optString("display_name")));
                 }
                 callback.onSuccess(people);
             } catch (Exception exception) {
@@ -234,12 +296,9 @@ final class SupabaseClient {
                 List<Message> messages = new ArrayList<>();
                 for (int i = 0; i < array.length(); i++) {
                     JSONObject item = array.getJSONObject(i);
-                    messages.add(new Message(
-                            item.optLong("message_id"),
-                            item.optString("sender_id"),
-                            item.optString("message_body"),
-                            item.optString("created_at")
-                    ));
+                    messages.add(new Message(item.optLong("message_id"),
+                            item.optString("sender_id"), item.optString("message_body"),
+                            item.optString("created_at")));
                 }
                 callback.onSuccess(messages);
             } catch (Exception exception) {
@@ -263,7 +322,7 @@ final class SupabaseClient {
         });
     }
 
-    void signOut() {
+    void clearSession() {
         preferences.edit().clear().apply();
     }
 
@@ -293,7 +352,7 @@ final class SupabaseClient {
         connection.setRequestMethod(method);
         connection.setConnectTimeout(15_000);
         connection.setReadTimeout(20_000);
-        connection.setRequestProperty("apikey", anonKey);
+        connection.setRequestProperty("apikey", publishableKey);
         if (token != null && !token.isEmpty()) {
             connection.setRequestProperty("Authorization", "Bearer " + token);
         }
@@ -322,7 +381,7 @@ final class SupabaseClient {
         JSONObject refreshPayload = new JSONObject().put("refresh_token", refreshToken());
         Response refreshed = request("POST", "/auth/v1/token?grant_type=refresh_token", null, refreshPayload);
         if (!refreshed.ok()) {
-            preferences.edit().clear().apply();
+            clearSession();
             return response;
         }
         saveSession(new JSONObject(refreshed.body));
@@ -347,24 +406,12 @@ final class SupabaseClient {
         if (!response.ok()) throw new IOException(apiError(response));
     }
 
-    private static String authError(Response response) {
-        try {
-            JSONObject data = new JSONObject(response.body);
-            String message = data.optString("msg", data.optString("message", data.optString("error_description")));
-            if (message.toLowerCase().contains("invalid login")) return "E-posta veya şifre yanlış.";
-            if (message.toLowerCase().contains("already registered")) return "Bu e-posta zaten kayıtlı.";
-            if (message.toLowerCase().contains("password")) return "Şifre en az 6 karakter olmalı.";
-            return message.isEmpty() ? "Giriş işlemi tamamlanamadı." : message;
-        } catch (Exception ignored) {
-            return "Giriş işlemi tamamlanamadı.";
-        }
-    }
-
     private static String apiError(Response response) {
         try {
             JSONObject data = new JSONObject(response.body);
-            String message = data.optString("message", data.optString("msg", data.optString("error")));
-            if (response.code == 401) return "Oturum süreniz doldu. Tekrar giriş yapın.";
+            String message = data.optString("message",
+                    data.optString("msg", data.optString("error_description", data.optString("error"))));
+            if (response.code == 401) return "Cihaz oturumu sona erdi. Uygulamayı yeniden açın.";
             return message.isEmpty() ? "Sunucu hatası (" + response.code + ")" : message;
         } catch (Exception ignored) {
             return "Sunucu hatası (" + response.code + ")";

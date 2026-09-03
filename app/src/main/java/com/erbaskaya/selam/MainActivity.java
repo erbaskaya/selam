@@ -1,13 +1,19 @@
 package com.erbaskaya.selam;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.database.Cursor;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.ContactsContract;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
@@ -25,30 +31,41 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.integration.android.IntentIntegrator;
+import com.google.zxing.integration.android.IntentResult;
+import com.journeyapps.barcodescanner.BarcodeEncoder;
+
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 public class MainActivity extends Activity {
-    private static final int BLUE = Color.rgb(36, 107, 253);
+    private static final int BLUE = Color.rgb(25, 105, 230);
     private static final int NAVY = Color.rgb(7, 17, 31);
     private static final int BACKGROUND = Color.rgb(242, 246, 251);
     private static final int TEXT = Color.rgb(20, 34, 53);
     private static final int MUTED = Color.rgb(103, 117, 137);
     private static final int BORDER = Color.rgb(218, 226, 237);
+    private static final int REQUEST_CONTACTS = 410;
     private static final long POLL_INTERVAL = 2_000L;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable pollMessages = this::refreshMessages;
     private SupabaseClient api;
+    private SupabaseClient.Profile myProfile;
     private FrameLayout root;
     private ProgressBar progress;
-    private String screen = "login";
+    private String screen = "boot";
     private String activeChatId;
     private ListView activeMessageList;
     private List<SupabaseClient.Message> activeMessages = new ArrayList<>();
+    private Map<String, String> localContactNames = new LinkedHashMap<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -60,46 +77,82 @@ public class MainActivity extends Activity {
         root = new FrameLayout(this);
         root.setBackgroundColor(BACKGROUND);
         setContentView(root);
-
         progress = new ProgressBar(this);
         progress.setLayoutParams(new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.CENTER));
         progress.setVisibility(View.GONE);
 
         if (!api.isConfigured()) showConfigurationNotice();
-        else if (api.hasSession()) showHome();
-        else showLogin(false);
+        else startDeviceAccount();
+    }
+
+    private void startDeviceAccount() {
+        showBoot("Cihaz hesabın hazırlanıyor…");
+        if (api.hasSession()) {
+            loadProfile();
+            return;
+        }
+        api.createDeviceSession(uiCallback(done -> loadProfile(),
+                this::showConnectionError));
+    }
+
+    private void loadProfile() {
+        api.getMyProfile(uiCallback(profile -> {
+            myProfile = profile;
+            setBusy(false);
+            if (profile.ready) showHome();
+            else showOnboarding();
+        }, this::showConnectionError));
+    }
+
+    private void showBoot(String message) {
+        stopPolling();
+        screen = "boot";
+        LinearLayout page = vertical();
+        page.setGravity(Gravity.CENTER);
+        page.setPadding(dp(30), dp(40), dp(30), dp(40));
+        ImageView logo = new ImageView(this);
+        logo.setImageResource(R.drawable.ic_launcher);
+        page.addView(logo, new LinearLayout.LayoutParams(dp(92), dp(92)));
+        TextView title = label("Selam", 30, TEXT, true);
+        title.setGravity(Gravity.CENTER);
+        page.addView(title, margin(-1, -2, 0, 18, 0, 8));
+        TextView status = label(message, 16, MUTED, false);
+        status.setGravity(Gravity.CENTER);
+        page.addView(status);
+        setPage(page);
+        setBusy(true);
     }
 
     private void showConfigurationNotice() {
         screen = "config";
-        LinearLayout page = vertical();
-        page.setGravity(Gravity.CENTER);
-        page.setPadding(dp(30), dp(40), dp(30), dp(40));
-
-        ImageView logo = new ImageView(this);
-        logo.setImageResource(R.drawable.ic_launcher);
-        page.addView(logo, new LinearLayout.LayoutParams(dp(92), dp(92)));
-
-        TextView title = label("Selam sunucusu hazırlanıyor", 24, TEXT, true);
-        title.setGravity(Gravity.CENTER);
-        page.addView(title, margin(-1, -2, 0, 24, 0, 8));
-
-        TextView description = label(
-                "Bu bağımsız sürüm gerçek mesajlaşma sunucusuna bağlanır. Sunucu adresi APK derlenirken eklenmelidir.",
-                16, MUTED, false);
-        description.setGravity(Gravity.CENTER);
-        page.addView(description, margin(-1, -2, 0, 0, 0, 24));
-
+        LinearLayout page = centeredPage();
+        page.addView(labelCentered("Selam sunucusu hazırlanıyor", 24, TEXT, true),
+                margin(-1, -2, 0, 0, 0, 12));
+        page.addView(labelCentered("Sunucu bağlantısı APK'ya eklenmemiş.", 16, MUTED, false),
+                margin(-1, -2, 0, 0, 0, 24));
         Button retry = primaryButton("Tekrar kontrol et");
         retry.setOnClickListener(v -> recreate());
         page.addView(retry, new LinearLayout.LayoutParams(-1, dp(54)));
         setPage(page);
     }
 
-    private void showLogin(boolean registerMode) {
-        stopPolling();
-        screen = "login";
+    private void showConnectionError(String message) {
+        setBusy(false);
+        screen = "error";
+        LinearLayout page = centeredPage();
+        page.addView(labelCentered("Bağlantı kurulamadı", 24, TEXT, true),
+                margin(-1, -2, 0, 0, 0, 12));
+        page.addView(labelCentered(message, 16, MUTED, false),
+                margin(-1, -2, 0, 0, 0, 24));
+        Button retry = primaryButton("Tekrar dene");
+        retry.setOnClickListener(v -> startDeviceAccount());
+        page.addView(retry, new LinearLayout.LayoutParams(-1, dp(54)));
+        setPage(page);
+    }
 
+    private void showOnboarding() {
+        stopPolling();
+        screen = "onboarding";
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         LinearLayout page = vertical();
@@ -109,68 +162,45 @@ public class MainActivity extends Activity {
 
         ImageView logo = new ImageView(this);
         logo.setImageResource(R.drawable.ic_launcher);
-        page.addView(logo, new LinearLayout.LayoutParams(dp(86), dp(86)));
-
-        TextView brand = label("Selam", 32, TEXT, true);
-        brand.setGravity(Gravity.CENTER);
-        page.addView(brand, margin(-1, -2, 0, 14, 0, 4));
-
-        TextView subtitle = label(registerMode ? "Yeni hesabını oluştur" : "Mesajlarına devam et", 16, MUTED, false);
-        subtitle.setGravity(Gravity.CENTER);
-        page.addView(subtitle, margin(-1, -2, 0, 0, 0, 28));
+        page.addView(logo, new LinearLayout.LayoutParams(dp(88), dp(88)));
+        page.addView(labelCentered("Selam'a hoş geldin", 28, TEXT, true),
+                margin(-1, -2, 0, 14, 0, 6));
+        page.addView(labelCentered("E-posta, şifre ve ücretli SMS olmadan cihaz hesabını oluştur.", 16, MUTED, false),
+                margin(-1, -2, 0, 0, 0, 26));
 
         EditText displayName = input("Adınız ve soyadınız", InputType.TYPE_CLASS_TEXT);
-        EditText username = input("Kullanıcı adı", InputType.TYPE_CLASS_TEXT);
-        if (registerMode) {
-            page.addView(displayName, margin(-1, dp(54), 0, 0, 0, 12));
-            page.addView(username, margin(-1, dp(54), 0, 0, 0, 12));
-        }
+        page.addView(displayName, margin(-1, dp(56), 0, 0, 0, 12));
+        EditText phone = input("Telefon numaranız (05xx xxx xx xx)",
+                InputType.TYPE_CLASS_PHONE);
+        page.addView(phone, margin(-1, dp(56), 0, 0, 0, 14));
 
-        EditText email = input("E-posta adresi", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
-        page.addView(email, margin(-1, dp(54), 0, 0, 0, 12));
+        TextView note = label("Bu numaraya SMS gönderilmez. Numara yalnızca rehberinizdeki Selam kullanıcılarını bulmak için kullanılır.", 14, MUTED, false);
+        note.setPadding(dp(14), dp(12), dp(14), dp(12));
+        note.setBackground(rounded(Color.rgb(232, 241, 255), Color.rgb(202, 220, 248), 12));
+        page.addView(note, margin(-1, -2, 0, 0, 0, 18));
 
-        EditText password = input("Şifre", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        page.addView(password, margin(-1, dp(54), 0, 0, 0, 18));
-
-        Button submit = primaryButton(registerMode ? "Hesap oluştur" : "Giriş yap");
-        page.addView(submit, new LinearLayout.LayoutParams(-1, dp(54)));
-
-        Button switchMode = textButton(registerMode ? "Zaten hesabım var" : "Yeni hesap oluştur");
-        page.addView(switchMode, margin(-1, dp(52), 0, 12, 0, 0));
-        switchMode.setOnClickListener(v -> showLogin(!registerMode));
-
-        submit.setOnClickListener(v -> {
-            String emailValue = email.getText().toString().trim();
-            String passwordValue = password.getText().toString();
-            if (emailValue.isEmpty() || passwordValue.length() < 6) {
-                toast("Geçerli e-posta ve en az 6 karakterli şifre girin.");
+        Button continueButton = primaryButton("Devam et");
+        page.addView(continueButton, new LinearLayout.LayoutParams(-1, dp(56)));
+        continueButton.setOnClickListener(v -> {
+            String nameValue = displayName.getText().toString().trim();
+            String normalized = normalizePhone(phone.getText().toString());
+            if (nameValue.length() < 2) {
+                toast("Lütfen adınızı yazın.");
+                return;
+            }
+            if (normalized == null) {
+                toast("Geçerli bir telefon numarası yazın.");
                 return;
             }
             setBusy(true);
             hideKeyboard();
-            if (registerMode) {
-                String usernameValue = username.getText().toString().trim();
-                String nameValue = displayName.getText().toString().trim();
-                if (!usernameValue.matches("[a-zA-Z0-9_.]{3,24}") || nameValue.length() < 2) {
-                    setBusy(false);
-                    toast("Kullanıcı adı 3-24 karakter olmalı; yalnızca harf, rakam, nokta ve alt çizgi kullanın.");
-                    return;
-                }
-                api.signUp(emailValue, passwordValue, usernameValue, nameValue,
-                        uiCallback(result -> {
-                            setBusy(false);
-                            toast(result.message);
-                            if (result.signedIn) showHome();
-                            else showLogin(false);
-                        }));
-            } else {
-                api.signIn(emailValue, passwordValue, uiCallback(result -> {
-                    setBusy(false);
-                    showHome();
-                }));
-            }
+            api.setupProfile(nameValue, normalized, uiCallback(profile -> {
+                myProfile = profile;
+                setBusy(false);
+                toast("Cihaz hesabın hazır.");
+                showContacts();
+            }));
         });
-
         setPage(scroll);
     }
 
@@ -182,45 +212,34 @@ public class MainActivity extends Activity {
 
         LinearLayout header = horizontal();
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(20), dp(14), dp(12), dp(14));
+        header.setPadding(dp(18), dp(13), dp(10), dp(13));
         header.setBackgroundColor(NAVY);
-
         ImageView icon = new ImageView(this);
         icon.setImageResource(R.drawable.ic_launcher);
         header.addView(icon, new LinearLayout.LayoutParams(dp(44), dp(44)));
-
         TextView title = label("Selam", 25, Color.WHITE, true);
-        title.setPadding(dp(12), 0, 0, 0);
+        title.setPadding(dp(11), 0, 0, 0);
         header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-
-        Button search = headerButton("Ara");
-        search.setOnClickListener(v -> showPeopleSearch());
-        header.addView(search, new LinearLayout.LayoutParams(dp(66), dp(44)));
-
-        Button logout = headerButton("Çıkış");
-        logout.setOnClickListener(v -> {
-            api.signOut();
-            showLogin(false);
-        });
-        header.addView(logout, new LinearLayout.LayoutParams(dp(68), dp(44)));
-        page.addView(header, new LinearLayout.LayoutParams(-1, -2));
+        Button contacts = headerButton("Kişiler");
+        contacts.setOnClickListener(v -> showContacts());
+        header.addView(contacts, new LinearLayout.LayoutParams(dp(78), dp(44)));
+        Button qr = headerButton("QR");
+        qr.setOnClickListener(v -> showMyQr());
+        header.addView(qr, new LinearLayout.LayoutParams(dp(50), dp(44)));
+        page.addView(header);
 
         TextView heading = label("Sohbetler", 21, TEXT, true);
         heading.setPadding(dp(20), dp(22), dp(20), dp(12));
         page.addView(heading);
-
         FrameLayout content = new FrameLayout(this);
-        ListView list = new ListView(this);
-        list.setDividerHeight(0);
-        list.setBackgroundColor(BACKGROUND);
-        TextView empty = label("Henüz sohbet yok. Sağ üstteki Ara düğmesiyle bir arkadaşını bul.", 16, MUTED, false);
+        ListView list = plainList();
+        TextView empty = label("Henüz sohbet yok. Kişiler bölümünden rehberindeki Selam kullanıcılarını bul.", 16, MUTED, false);
         empty.setGravity(Gravity.CENTER);
         empty.setPadding(dp(34), dp(34), dp(34), dp(34));
         content.addView(list, new FrameLayout.LayoutParams(-1, -1));
         content.addView(empty, new FrameLayout.LayoutParams(-1, -1));
         list.setEmptyView(empty);
         page.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
-
         setPage(page);
         loadChats(list);
     }
@@ -237,23 +256,103 @@ public class MainActivity extends Activity {
         }));
     }
 
+    private void showContacts() {
+        stopPolling();
+        screen = "contacts";
+        LinearLayout page = vertical();
+        page.addView(topBar("Selam kullananlar", this::showHome));
+
+        LinearLayout actions = horizontal();
+        actions.setPadding(dp(14), dp(12), dp(14), dp(8));
+        Button scanQr = primaryButton("QR tara");
+        scanQr.setOnClickListener(v -> scanQrCode());
+        actions.addView(scanQr, new LinearLayout.LayoutParams(0, dp(50), 1));
+        Button search = textButton("Kullanıcı ara");
+        search.setBackground(rounded(Color.WHITE, BORDER, 14));
+        search.setOnClickListener(v -> showPeopleSearch());
+        LinearLayout.LayoutParams searchParams = new LinearLayout.LayoutParams(0, dp(50), 1);
+        searchParams.setMargins(dp(10), 0, 0, 0);
+        actions.addView(search, searchParams);
+        page.addView(actions);
+
+        FrameLayout content = new FrameLayout(this);
+        ListView list = plainList();
+        TextView empty = label("Rehberinizde henüz Selam kullanan kişi bulunamadı.", 16, MUTED, false);
+        empty.setGravity(Gravity.CENTER);
+        empty.setPadding(dp(30), dp(30), dp(30), dp(30));
+        content.addView(list, new FrameLayout.LayoutParams(-1, -1));
+        content.addView(empty, new FrameLayout.LayoutParams(-1, -1));
+        list.setEmptyView(empty);
+        page.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
+        setPage(page);
+
+        if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+            empty.setText("Selam kullanan kişileri gösterebilmek için rehber erişimine izin verin.");
+            Button allow = primaryButton("Rehbere izin ver");
+            allow.setOnClickListener(v -> requestPermissions(
+                    new String[]{Manifest.permission.READ_CONTACTS}, REQUEST_CONTACTS));
+            page.addView(allow, margin(-1, dp(54), 18, 8, 18, 18));
+        } else {
+            loadContactMatches(list, empty);
+        }
+    }
+
+    private void loadContactMatches(ListView list, TextView empty) {
+        setBusy(true);
+        new Thread(() -> {
+            Map<String, String> contacts = readPhoneBook();
+            runOnUiThread(() -> {
+                localContactNames = contacts;
+                if (contacts.isEmpty()) {
+                    setBusy(false);
+                    empty.setText("Rehberinizde telefon numarası bulunamadı.");
+                    return;
+                }
+                api.matchContacts(new ArrayList<>(contacts.keySet()), uiCallback(matches -> {
+                    setBusy(false);
+                    empty.setText("Rehberinizde henüz Selam kullanan kişi bulunamadı.");
+                    list.setAdapter(new ContactAdapter(matches));
+                    list.setOnItemClickListener((parent, view, position, id) -> {
+                        SupabaseClient.ContactMatch person = matches.get(position);
+                        String localName = localContactNames.get(person.matchedPhone);
+                        startChat(person, localName == null
+                                ? preferredName(person.displayName, person.username) : localName);
+                    });
+                }));
+            });
+        }).start();
+    }
+
+    private Map<String, String> readPhoneBook() {
+        Map<String, String> contacts = new LinkedHashMap<>();
+        String[] columns = {
+                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                ContactsContract.CommonDataKinds.Phone.NUMBER
+        };
+        try (Cursor cursor = getContentResolver().query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                columns, null, null,
+                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC")) {
+            if (cursor == null) return contacts;
+            int nameIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME);
+            int numberIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER);
+            while (cursor.moveToNext() && contacts.size() < 2000) {
+                String normalized = normalizePhone(cursor.getString(numberIndex));
+                if (normalized != null && !contacts.containsKey(normalized)) {
+                    String name = cursor.getString(nameIndex);
+                    contacts.put(normalized, name == null || name.trim().isEmpty() ? normalized : name.trim());
+                }
+            }
+        } catch (SecurityException ignored) {
+            return contacts;
+        }
+        return contacts;
+    }
+
     private void showPeopleSearch() {
         screen = "search";
         LinearLayout page = vertical();
-
-        LinearLayout header = horizontal();
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(10), dp(12), dp(14), dp(12));
-        header.setBackgroundColor(NAVY);
-
-        Button back = headerButton("‹");
-        back.setTextSize(30);
-        back.setOnClickListener(v -> showHome());
-        header.addView(back, new LinearLayout.LayoutParams(dp(52), dp(48)));
-        TextView title = label("Yeni sohbet", 21, Color.WHITE, true);
-        header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-        page.addView(header);
-
+        page.addView(topBar("Kullanıcı ara", this::showContacts));
         LinearLayout searchBar = horizontal();
         searchBar.setPadding(dp(16), dp(16), dp(16), dp(12));
         EditText query = input("Kullanıcı adı veya ad", InputType.TYPE_CLASS_TEXT);
@@ -263,16 +362,12 @@ public class MainActivity extends Activity {
         Button find = primaryButton("Bul");
         searchBar.addView(find, new LinearLayout.LayoutParams(dp(78), dp(52)));
         page.addView(searchBar);
-
-        ListView results = new ListView(this);
-        results.setDividerHeight(0);
+        ListView results = plainList();
         page.addView(results, new LinearLayout.LayoutParams(-1, 0, 1));
-
-        TextView help = label("Arkadaşınızın kullanıcı adını yazarak sohbet başlatabilirsiniz.", 16, MUTED, false);
+        TextView help = label("Kullanıcı adıyla da arkadaşınızı bulabilirsiniz.", 15, MUTED, false);
         help.setGravity(Gravity.CENTER);
-        help.setPadding(dp(32), dp(18), dp(32), dp(24));
-        page.addView(help, new LinearLayout.LayoutParams(-1, -2));
-
+        help.setPadding(dp(32), dp(16), dp(32), dp(24));
+        page.addView(help);
         find.setOnClickListener(v -> {
             String text = query.getText().toString().trim();
             if (text.length() < 2) {
@@ -282,21 +377,105 @@ public class MainActivity extends Activity {
             setBusy(true);
             api.searchPeople(text, uiCallback(people -> {
                 setBusy(false);
-                help.setText(people.isEmpty() ? "Eşleşen kullanıcı bulunamadı." : "Kullanıcıya dokunarak sohbeti başlatın.");
+                help.setText(people.isEmpty() ? "Eşleşen kullanıcı bulunamadı." : "Mesajlaşmak için kullanıcıya dokunun.");
                 results.setAdapter(new PersonAdapter(people));
                 results.setOnItemClickListener((parent, view, position, id) -> {
                     SupabaseClient.Person person = people.get(position);
-                    setBusy(true);
-                    api.startDirectChat(person.id, uiCallback(chatId -> {
-                        setBusy(false);
-                        openChat(chatId, preferredName(person.displayName, person.username));
-                    }));
+                    startChat(person, preferredName(person.displayName, person.username));
                 });
             }));
         });
-
         setPage(page);
         query.requestFocus();
+    }
+
+    private void startChat(SupabaseClient.Person person, String shownName) {
+        setBusy(true);
+        api.startDirectChat(person.id, uiCallback(chatId -> {
+            setBusy(false);
+            openChat(chatId, shownName);
+        }));
+    }
+
+    private void showMyQr() {
+        screen = "profile";
+        LinearLayout page = vertical();
+        page.addView(topBar("QR kodum", this::showHome));
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout content = vertical();
+        content.setGravity(Gravity.CENTER_HORIZONTAL);
+        content.setPadding(dp(26), dp(24), dp(26), dp(30));
+        content.addView(avatar(myProfile.displayName, 72),
+                new LinearLayout.LayoutParams(dp(72), dp(72)));
+        content.addView(labelCentered(myProfile.displayName, 23, TEXT, true),
+                margin(-1, -2, 0, 12, 0, 3));
+        content.addView(labelCentered("@" + myProfile.username + "  •  •••• " + myProfile.phoneLast4,
+                        14, MUTED, false), margin(-1, -2, 0, 0, 0, 18));
+        try {
+            Bitmap bitmap = new BarcodeEncoder().encodeBitmap(
+                    "SELAM:" + myProfile.safetyCode, BarcodeFormat.QR_CODE, 700, 700);
+            ImageView qr = new ImageView(this);
+            qr.setImageBitmap(bitmap);
+            qr.setAdjustViewBounds(true);
+            qr.setBackgroundColor(Color.WHITE);
+            content.addView(qr, new LinearLayout.LayoutParams(dp(270), dp(270)));
+        } catch (Exception exception) {
+            content.addView(labelCentered("QR kod oluşturulamadı.", 15, MUTED, false));
+        }
+        content.addView(labelCentered("Güvenlik kodu: " + spacedCode(myProfile.safetyCode),
+                        17, TEXT, true), margin(-1, -2, 0, 16, 0, 8));
+        content.addView(labelCentered("Arkadaşınız bu kodu tarayarak doğru kişiyle konuştuğunu kontrol edebilir.", 14, MUTED, false),
+                margin(-1, -2, 0, 0, 0, 22));
+        Button scan = primaryButton("Arkadaşımın QR kodunu tara");
+        scan.setOnClickListener(v -> scanQrCode());
+        content.addView(scan, new LinearLayout.LayoutParams(-1, dp(54)));
+        scroll.addView(content);
+        page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        setPage(page);
+    }
+
+    private void scanQrCode() {
+        new IntentIntegrator(this)
+                .setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
+                .setPrompt("Selam QR kodunu çerçeveye yerleştirin")
+                .setBeepEnabled(false)
+                .setOrientationLocked(false)
+                .initiateScan();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        IntentResult result = IntentIntegrator.parseActivityResult(requestCode, resultCode, data);
+        if (result != null) {
+            if (result.getContents() == null) {
+                toast("QR tarama iptal edildi.");
+                return;
+            }
+            String contents = result.getContents().trim();
+            if (!contents.startsWith("SELAM:")) {
+                toast("Bu bir Selam QR kodu değil.");
+                return;
+            }
+            setBusy(true);
+            api.findInvite(contents.substring(6), uiCallback(person -> {
+                setBusy(false);
+                startChat(person, preferredName(person.displayName, person.username));
+            }));
+            return;
+        }
+        super.onActivityResult(requestCode, resultCode, data);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_CONTACTS) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                showContacts();
+            } else {
+                toast("Rehber izni olmadan kullanıcı adı veya QR koduyla arkadaş ekleyebilirsiniz.");
+            }
+        }
     }
 
     private void openChat(String chatId, String chatName) {
@@ -304,39 +483,19 @@ public class MainActivity extends Activity {
         screen = "chat";
         activeChatId = chatId;
         activeMessages = new ArrayList<>();
-
         LinearLayout page = vertical();
-        LinearLayout header = horizontal();
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(8), dp(10), dp(14), dp(10));
-        header.setBackgroundColor(NAVY);
-
-        Button back = headerButton("‹");
-        back.setTextSize(30);
-        back.setOnClickListener(v -> showHome());
-        header.addView(back, new LinearLayout.LayoutParams(dp(52), dp(48)));
-
-        TextView avatar = avatar(chatName, 42);
-        header.addView(avatar, new LinearLayout.LayoutParams(dp(42), dp(42)));
-
-        LinearLayout names = vertical();
-        names.setPadding(dp(10), 0, 0, 0);
-        names.addView(label(chatName, 18, Color.WHITE, true));
-        names.addView(label("mesajlaşma", 12, Color.rgb(181, 198, 222), false));
-        header.addView(names, new LinearLayout.LayoutParams(0, -2, 1));
+        LinearLayout header = topBar(chatName, this::showHome);
         page.addView(header);
-
-        activeMessageList = new ListView(this);
-        activeMessageList.setDividerHeight(0);
+        activeMessageList = plainList();
         activeMessageList.setTranscriptMode(ListView.TRANSCRIPT_MODE_ALWAYS_SCROLL);
         activeMessageList.setStackFromBottom(true);
         page.addView(activeMessageList, new LinearLayout.LayoutParams(-1, 0, 1));
-
         LinearLayout composer = horizontal();
         composer.setGravity(Gravity.CENTER_VERTICAL);
         composer.setPadding(dp(12), dp(10), dp(12), dp(12));
         composer.setBackgroundColor(Color.WHITE);
-        EditText message = input("Mesaj", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        EditText message = input("Mesaj", InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         message.setMaxLines(4);
         LinearLayout.LayoutParams messageParams = new LinearLayout.LayoutParams(0, -2, 1);
         messageParams.setMargins(0, 0, dp(10), 0);
@@ -344,7 +503,6 @@ public class MainActivity extends Activity {
         Button send = primaryButton("Gönder");
         composer.addView(send, new LinearLayout.LayoutParams(dp(94), dp(52)));
         page.addView(composer);
-
         send.setOnClickListener(v -> {
             String body = message.getText().toString().trim();
             if (body.isEmpty()) return;
@@ -355,7 +513,6 @@ public class MainActivity extends Activity {
                 refreshMessages();
             }, error -> send.setEnabled(true)));
         });
-
         setPage(page);
         refreshMessages();
     }
@@ -366,11 +523,13 @@ public class MainActivity extends Activity {
             if (!"chat".equals(screen) || activeMessageList == null) return;
             boolean changed = activeMessages.size() != messages.size()
                     || (!messages.isEmpty() && (activeMessages.isEmpty()
-                    || activeMessages.get(activeMessages.size() - 1).id != messages.get(messages.size() - 1).id));
+                    || activeMessages.get(activeMessages.size() - 1).id
+                    != messages.get(messages.size() - 1).id));
             activeMessages = messages;
             if (changed) {
                 activeMessageList.setAdapter(new MessageAdapter(messages));
-                activeMessageList.post(() -> activeMessageList.setSelection(Math.max(0, messages.size() - 1)));
+                activeMessageList.post(() -> activeMessageList.setSelection(
+                        Math.max(0, messages.size() - 1)));
             }
             handler.removeCallbacks(pollMessages);
             handler.postDelayed(pollMessages, POLL_INTERVAL);
@@ -378,6 +537,24 @@ public class MainActivity extends Activity {
             handler.removeCallbacks(pollMessages);
             handler.postDelayed(pollMessages, POLL_INTERVAL * 2);
         }));
+    }
+
+    private static String normalizePhone(String raw) {
+        if (raw == null) return null;
+        String trimmed = raw.trim();
+        boolean international = trimmed.startsWith("+");
+        String digits = trimmed.replaceAll("[^0-9]", "");
+        if (digits.startsWith("00")) {
+            digits = digits.substring(2);
+            international = true;
+        }
+        String result;
+        if (international) result = "+" + digits;
+        else if (digits.length() == 11 && digits.startsWith("0")) result = "+90" + digits.substring(1);
+        else if (digits.length() == 10) result = "+90" + digits;
+        else if (digits.length() == 12 && digits.startsWith("90")) result = "+" + digits;
+        else return null;
+        return result.matches("^\\+[1-9][0-9]{7,14}$") ? result : null;
     }
 
     private void stopPolling() {
@@ -400,19 +577,13 @@ public class MainActivity extends Activity {
 
     private <T> SupabaseClient.Callback<T> uiCallback(Success<T> success, Failure failure) {
         return new SupabaseClient.Callback<T>() {
-            @Override
-            public void onSuccess(T value) {
+            @Override public void onSuccess(T value) {
                 runOnUiThread(() -> success.run(value));
             }
-
-            @Override
-            public void onError(String message) {
+            @Override public void onError(String message) {
                 runOnUiThread(() -> {
                     setBusy(false);
                     toast(message);
-                    if (!api.hasSession() && !"login".equals(screen) && !"config".equals(screen)) {
-                        showLogin(false);
-                    }
                     failure.run(message);
                 });
             }
@@ -421,6 +592,30 @@ public class MainActivity extends Activity {
 
     private interface Success<T> { void run(T value); }
     private interface Failure { void run(String message); }
+
+    private LinearLayout centeredPage() {
+        LinearLayout page = vertical();
+        page.setGravity(Gravity.CENTER);
+        page.setPadding(dp(30), dp(40), dp(30), dp(40));
+        ImageView logo = new ImageView(this);
+        logo.setImageResource(R.drawable.ic_launcher);
+        page.addView(logo, new LinearLayout.LayoutParams(dp(92), dp(92)));
+        return page;
+    }
+
+    private LinearLayout topBar(String title, Runnable backAction) {
+        LinearLayout header = horizontal();
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(dp(8), dp(10), dp(14), dp(10));
+        header.setBackgroundColor(NAVY);
+        Button back = headerButton("‹");
+        back.setTextSize(30);
+        back.setOnClickListener(v -> backAction.run());
+        header.addView(back, new LinearLayout.LayoutParams(dp(52), dp(48)));
+        TextView titleView = label(title, 20, Color.WHITE, true);
+        header.addView(titleView, new LinearLayout.LayoutParams(0, -2, 1));
+        return header;
+    }
 
     private LinearLayout vertical() {
         LinearLayout layout = new LinearLayout(this);
@@ -434,6 +629,13 @@ public class MainActivity extends Activity {
         return layout;
     }
 
+    private ListView plainList() {
+        ListView list = new ListView(this);
+        list.setDividerHeight(0);
+        list.setBackgroundColor(BACKGROUND);
+        return list;
+    }
+
     private TextView label(String value, int size, int color, boolean bold) {
         TextView view = new TextView(this);
         view.setText(value);
@@ -441,6 +643,12 @@ public class MainActivity extends Activity {
         view.setTextColor(color);
         view.setTypeface(Typeface.create("sans", bold ? Typeface.BOLD : Typeface.NORMAL));
         view.setLineSpacing(0, 1.12f);
+        return view;
+    }
+
+    private TextView labelCentered(String value, int size, int color, boolean bold) {
+        TextView view = label(value, size, color, bold);
+        view.setGravity(Gravity.CENTER);
         return view;
     }
 
@@ -464,7 +672,7 @@ public class MainActivity extends Activity {
         button.setTextColor(Color.WHITE);
         button.setTypeface(Typeface.DEFAULT_BOLD);
         button.setAllCaps(false);
-        button.setPadding(dp(12), 0, dp(12), 0);
+        button.setPadding(dp(10), 0, dp(10), 0);
         button.setBackground(rounded(BLUE, BLUE, 14));
         return button;
     }
@@ -483,7 +691,7 @@ public class MainActivity extends Activity {
         Button button = textButton(value);
         button.setTextColor(Color.WHITE);
         button.setTextSize(14);
-        button.setPadding(dp(4), 0, dp(4), 0);
+        button.setPadding(dp(3), 0, dp(3), 0);
         return button;
     }
 
@@ -530,22 +738,27 @@ public class MainActivity extends Activity {
 
     private static String initial(String name) {
         if (name == null || name.trim().isEmpty()) return "S";
-        return name.trim().substring(0, 1).toUpperCase();
+        return name.trim().substring(0, 1).toUpperCase(Locale.getDefault());
     }
 
     private static String time(String iso) {
         try {
             return DateTimeFormatter.ofPattern("HH:mm")
-                    .withZone(ZoneId.systemDefault())
-                    .format(Instant.parse(iso));
+                    .withZone(ZoneId.systemDefault()).format(Instant.parse(iso));
         } catch (Exception ignored) {
             return "";
         }
     }
 
+    private static String spacedCode(String code) {
+        if (code == null) return "";
+        return code.replaceAll("(.{4})(?!$)", "$1 ");
+    }
+
     @Override
     public void onBackPressed() {
-        if ("chat".equals(screen) || "search".equals(screen)) showHome();
+        if ("chat".equals(screen) || "contacts".equals(screen)
+                || "search".equals(screen) || "profile".equals(screen)) showHome();
         else super.onBackPressed();
     }
 
@@ -562,30 +775,32 @@ public class MainActivity extends Activity {
         @Override public int getCount() { return items.size(); }
         @Override public Object getItem(int position) { return items.get(position); }
         @Override public long getItemId(int position) { return position; }
-
-        @Override
-        public View getView(int position, View convertView, ViewGroup parent) {
+        @Override public View getView(int position, View convertView, ViewGroup parent) {
             SupabaseClient.Chat chat = items.get(position);
             String name = preferredName(chat.displayName, chat.username);
-            LinearLayout row = horizontal();
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(dp(18), dp(12), dp(18), dp(12));
-            row.setBackgroundColor(Color.WHITE);
-            row.addView(avatar(name, 52), new LinearLayout.LayoutParams(dp(52), dp(52)));
-
-            LinearLayout text = vertical();
-            text.setPadding(dp(14), 0, dp(6), 0);
-            text.addView(label(name, 17, TEXT, true));
-            TextView preview = label(chat.lastMessage == null || chat.lastMessage.isEmpty()
-                    ? "Yeni sohbet" : chat.lastMessage, 14, MUTED, false);
-            preview.setMaxLines(1);
-            text.addView(preview);
-            row.addView(text, new LinearLayout.LayoutParams(0, -2, 1));
+            LinearLayout row = personRow(name, chat.lastMessage == null || chat.lastMessage.isEmpty()
+                    ? "Yeni sohbet" : chat.lastMessage, 52);
             row.addView(label(time(chat.lastMessageAt), 12, MUTED, false));
+            row.setLayoutParams(rowParams(78));
+            return row;
+        }
+    }
 
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(78));
-            params.setMargins(dp(12), dp(4), dp(12), dp(4));
-            row.setLayoutParams(params);
+    private final class ContactAdapter extends BaseAdapter {
+        private final List<SupabaseClient.ContactMatch> items;
+        ContactAdapter(List<SupabaseClient.ContactMatch> items) { this.items = items; }
+        @Override public int getCount() { return items.size(); }
+        @Override public Object getItem(int position) { return items.get(position); }
+        @Override public long getItemId(int position) { return position; }
+        @Override public View getView(int position, View convertView, ViewGroup parent) {
+            SupabaseClient.ContactMatch person = items.get(position);
+            String localName = localContactNames.get(person.matchedPhone);
+            String name = localName == null ? preferredName(person.displayName, person.username) : localName;
+            String subtitle = localName == null || localName.equals(person.displayName)
+                    ? "Selam kullanıyor" : person.displayName + " • Selam kullanıyor";
+            LinearLayout row = personRow(name, subtitle, 48);
+            row.addView(label("Mesaj →", 14, BLUE, true));
+            row.setLayoutParams(rowParams(74));
             return row;
         }
     }
@@ -596,28 +811,36 @@ public class MainActivity extends Activity {
         @Override public int getCount() { return items.size(); }
         @Override public Object getItem(int position) { return items.get(position); }
         @Override public long getItemId(int position) { return position; }
-
-        @Override
-        public View getView(int position, View convertView, ViewGroup parent) {
+        @Override public View getView(int position, View convertView, ViewGroup parent) {
             SupabaseClient.Person person = items.get(position);
             String name = preferredName(person.displayName, person.username);
-            LinearLayout row = horizontal();
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(dp(18), dp(10), dp(18), dp(10));
-            row.setBackgroundColor(Color.WHITE);
-            row.addView(avatar(name, 48), new LinearLayout.LayoutParams(dp(48), dp(48)));
-            LinearLayout text = vertical();
-            text.setPadding(dp(14), 0, 0, 0);
-            text.addView(label(name, 17, TEXT, true));
-            text.addView(label("@" + person.username, 14, MUTED, false));
-            row.addView(text, new LinearLayout.LayoutParams(0, -2, 1));
+            LinearLayout row = personRow(name, "@" + person.username, 48);
             row.addView(label("Mesaj →", 14, BLUE, true));
-
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(72));
-            params.setMargins(dp(12), dp(4), dp(12), dp(4));
-            row.setLayoutParams(params);
+            row.setLayoutParams(rowParams(72));
             return row;
         }
+    }
+
+    private LinearLayout personRow(String name, String subtitle, int avatarSize) {
+        LinearLayout row = horizontal();
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(18), dp(10), dp(18), dp(10));
+        row.setBackgroundColor(Color.WHITE);
+        row.addView(avatar(name, avatarSize), new LinearLayout.LayoutParams(dp(avatarSize), dp(avatarSize)));
+        LinearLayout text = vertical();
+        text.setPadding(dp(14), 0, dp(6), 0);
+        text.addView(label(name, 17, TEXT, true));
+        TextView sub = label(subtitle, 14, MUTED, false);
+        sub.setMaxLines(1);
+        text.addView(sub);
+        row.addView(text, new LinearLayout.LayoutParams(0, -2, 1));
+        return row;
+    }
+
+    private LinearLayout.LayoutParams rowParams(int height) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(height));
+        params.setMargins(dp(12), dp(4), dp(12), dp(4));
+        return params;
     }
 
     private final class MessageAdapter extends BaseAdapter {
@@ -626,20 +849,20 @@ public class MainActivity extends Activity {
         @Override public int getCount() { return items.size(); }
         @Override public Object getItem(int position) { return items.get(position); }
         @Override public long getItemId(int position) { return items.get(position).id; }
-
-        @Override
-        public View getView(int position, View convertView, ViewGroup parent) {
+        @Override public View getView(int position, View convertView, ViewGroup parent) {
             SupabaseClient.Message message = items.get(position);
             boolean mine = api.userId().equals(message.senderId);
             LinearLayout outer = vertical();
             outer.setGravity(mine ? Gravity.END : Gravity.START);
-            outer.setPadding(mine ? dp(58) : dp(10), dp(4), mine ? dp(10) : dp(58), dp(4));
-
+            outer.setPadding(mine ? dp(58) : dp(10), dp(4),
+                    mine ? dp(10) : dp(58), dp(4));
             LinearLayout bubble = vertical();
             bubble.setPadding(dp(13), dp(9), dp(11), dp(7));
-            bubble.setBackground(rounded(mine ? BLUE : Color.WHITE, mine ? BLUE : BORDER, 16));
+            bubble.setBackground(rounded(mine ? BLUE : Color.WHITE,
+                    mine ? BLUE : BORDER, 16));
             bubble.addView(label(message.body, 16, mine ? Color.WHITE : TEXT, false));
-            TextView when = label(time(message.createdAt), 11, mine ? Color.rgb(219, 232, 255) : MUTED, false);
+            TextView when = label(time(message.createdAt), 11,
+                    mine ? Color.rgb(219, 232, 255) : MUTED, false);
             when.setGravity(Gravity.END);
             bubble.addView(when);
             outer.addView(bubble, new LinearLayout.LayoutParams(-2, -2));
