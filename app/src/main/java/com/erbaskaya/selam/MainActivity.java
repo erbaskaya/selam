@@ -75,8 +75,20 @@ public class MainActivity extends Activity {
         api = new SupabaseClient(this);
 
         root = new FrameLayout(this);
-        root.setBackgroundColor(BACKGROUND);
+        // Android 15+ sistem çubuklarını içerik üstüne bindirir. Kök görünüm
+        // çubukların güvenli alanını taşır; sayfalar bu alanın içinde kalır.
+        root.setBackgroundColor(NAVY);
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            view.setPadding(
+                    insets.getSystemWindowInsetLeft(),
+                    insets.getSystemWindowInsetTop(),
+                    insets.getSystemWindowInsetRight(),
+                    insets.getSystemWindowInsetBottom()
+            );
+            return insets;
+        });
         setContentView(root);
+        root.requestApplyInsets();
         progress = new ProgressBar(this);
         progress.setLayoutParams(new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.CENTER));
         progress.setVisibility(View.GONE);
@@ -562,6 +574,7 @@ public class MainActivity extends Activity {
     }
 
     private void setPage(View page) {
+        page.setBackgroundColor(BACKGROUND);
         root.removeAllViews();
         root.addView(page, new FrameLayout.LayoutParams(-1, -1));
         root.addView(progress);

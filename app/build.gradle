@@ -10,8 +10,8 @@ android {
         applicationId "com.erbaskaya.selam"
         minSdk 26
         targetSdk 36
-        versionCode 3
-        versionName "1.2.0"
+        versionCode 4
+        versionName "1.2.1"
 
         def supabaseUrl = System.getenv("SUPABASE_URL") ?: "https://czaangjaxdffliwigcbx.supabase.co"
         // Supabase publishable anahtarı mobil istemcilerde açıkça kullanılmak üzere tasarlanmıştır.
