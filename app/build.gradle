@@ -13,8 +13,9 @@ android {
         versionCode 2
         versionName "1.1.0"
 
-        def supabaseUrl = System.getenv("SUPABASE_URL") ?: ""
-        def supabaseAnonKey = System.getenv("SUPABASE_ANON_KEY") ?: ""
+        def supabaseUrl = System.getenv("SUPABASE_URL") ?: "https://czaangjaxdffliwigcbx.supabase.co"
+        // Supabase publishable anahtarı mobil istemcilerde açıkça kullanılmak üzere tasarlanmıştır.
+        def supabaseAnonKey = System.getenv("SUPABASE_ANON_KEY") ?: "sb_publishable_O6uX6S8scE5ha7zYF_G32g_QKE_CEST"
         buildConfigField "String", "SUPABASE_URL", "\"${supabaseUrl}\""
         buildConfigField "String", "SUPABASE_ANON_KEY", "\"${supabaseAnonKey}\""
     }

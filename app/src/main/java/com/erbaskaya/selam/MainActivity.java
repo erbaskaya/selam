@@ -410,6 +410,9 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     setBusy(false);
                     toast(message);
+                    if (!api.hasSession() && !"login".equals(screen) && !"config".equals(screen)) {
+                        showLogin(false);
+                    }
                     failure.run(message);
                 });
             }

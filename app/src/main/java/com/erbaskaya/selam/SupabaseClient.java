@@ -294,7 +294,9 @@ final class SupabaseClient {
         connection.setConnectTimeout(15_000);
         connection.setReadTimeout(20_000);
         connection.setRequestProperty("apikey", anonKey);
-        connection.setRequestProperty("Authorization", "Bearer " + (token == null ? anonKey : token));
+        if (token != null && !token.isEmpty()) {
+            connection.setRequestProperty("Authorization", "Bearer " + token);
+        }
         connection.setRequestProperty("Content-Type", "application/json");
         connection.setRequestProperty("Accept", "application/json");
         connection.setDoOutput(true);

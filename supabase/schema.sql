@@ -51,7 +51,7 @@ revoke all on public.messages from anon, authenticated;
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
-security definer set search_path = public
+security definer set search_path = ''
 as $$
 declare
   requested_username text;
@@ -82,12 +82,12 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
 
-revoke all on function public.handle_new_user() from public;
+revoke all on function public.handle_new_user() from anon, authenticated, public;
 
 create or replace function public.search_people(search_text text)
 returns table (user_id uuid, username text, display_name text)
 language sql
-security definer set search_path = public
+security definer set search_path = ''
 stable
 as $$
   select p.id, p.username, p.display_name
@@ -106,7 +106,7 @@ $$;
 create or replace function public.start_direct_chat(other_user_id uuid)
 returns uuid
 language plpgsql
-security definer set search_path = public
+security definer set search_path = ''
 as $$
 declare
   current_user_id uuid := auth.uid();
@@ -151,7 +151,7 @@ returns table (
   last_message_at timestamptz
 )
 language sql
-security definer set search_path = public
+security definer set search_path = ''
 stable
 as $$
   select c.id,
@@ -180,7 +180,7 @@ $$;
 create or replace function public.list_chat_messages(chat_id uuid)
 returns table (message_id bigint, sender_id uuid, message_body text, created_at timestamptz)
 language plpgsql
-security definer set search_path = public
+security definer set search_path = ''
 stable
 as $$
 begin
@@ -201,7 +201,7 @@ $$;
 create or replace function public.send_chat_message(chat_id uuid, message_body text)
 returns bigint
 language plpgsql
-security definer set search_path = public
+security definer set search_path = ''
 as $$
 declare
   new_id bigint;
@@ -222,11 +222,11 @@ begin
 end;
 $$;
 
-revoke all on function public.search_people(text) from public;
-revoke all on function public.start_direct_chat(uuid) from public;
-revoke all on function public.list_my_chats() from public;
-revoke all on function public.list_chat_messages(uuid) from public;
-revoke all on function public.send_chat_message(uuid, text) from public;
+revoke all on function public.search_people(text) from anon, authenticated, public;
+revoke all on function public.start_direct_chat(uuid) from anon, authenticated, public;
+revoke all on function public.list_my_chats() from anon, authenticated, public;
+revoke all on function public.list_chat_messages(uuid) from anon, authenticated, public;
+revoke all on function public.send_chat_message(uuid, text) from anon, authenticated, public;
 
 grant execute on function public.search_people(text) to authenticated;
 grant execute on function public.start_direct_chat(uuid) to authenticated;

@@ -13,13 +13,13 @@ Selam, bağımsız çalışan mavi temalı Android mesajlaşma uygulamasıdır. 
 - Veritabanı seviyesinde sohbet erişim kontrolü
 - Mavi tasarım ve tokalaşma ikonu
 
-## Supabase kurulumu
+## Supabase bağlantısı
 
-1. `supabase/schema.sql` dosyasını Supabase projesinde çalıştırın.
-2. GitHub reposunda `Settings > Secrets and variables > Actions` bölümüne şu secret'ları ekleyin:
-   - `SUPABASE_URL`
-   - `SUPABASE_ANON_KEY`
-3. Actions içindeki **Selam APK Oluştur** iş akışını çalıştırın.
+Uygulama `Selam` Supabase projesine önceden bağlanmıştır. `supabase/schema.sql` şeması projeye uygulanmıştır.
+
+Bağlantıyı başka bir Supabase projesine taşımak gerekirse GitHub reposunda `Settings > Secrets and variables > Actions` bölümüne `SUPABASE_URL` ve `SUPABASE_ANON_KEY` değerleri eklenebilir. Bunlar kaynak kodundaki varsayılan bağlantıyı geçersiz kılar.
+
+APK oluşturmak için Actions içindeki **Selam APK Oluştur** iş akışını çalıştırın.
 
 Servis rolü anahtarını APK'ya veya GitHub secret'ına eklemeyin. Yalnızca istemciler için hazırlanmış anon/publishable anahtar kullanılmalıdır.
 
