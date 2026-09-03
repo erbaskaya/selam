@@ -1,17 +1,28 @@
 # Selam Android
 
-Selam mesajlaşma uygulamasının Android paketidir. Uygulama açıldığında güncel Selam servisini tam ekran WebView içinde yükler.
+Selam, bağımsız çalışan mavi temalı Android mesajlaşma uygulamasıdır. Uygulama artık WebView kullanmaz ve ChatGPT oturumu istemez.
 
-## APK oluşturma
+## Çalışan özellikler
 
-1. GitHub'da **Actions** sekmesini açın.
-2. **Selam APK Oluştur** iş akışını seçin.
-3. **Run workflow** düğmesine basın.
-4. İşlem tamamlandığında sayfanın altındaki **Selam-APK** dosyasını indirin.
-5. ZIP içindeki `Selam.apk` dosyasını Android telefona kurun.
+- E-posta ve şifreyle kayıt/giriş
+- Benzersiz kullanıcı adı
+- Kullanıcı arama
+- Birebir sohbet başlatma
+- Mesaj gönderme ve otomatik yenileme
+- Güvenli oturum saklama
+- Veritabanı seviyesinde sohbet erişim kontrolü
+- Mavi tasarım ve tokalaşma ikonu
 
-Her `main` güncellemesinde APK yeniden oluşturulur. GitHub Actions tarafından hazırlanan debug APK Android'e doğrudan kurulabilir; Google Play yayını için ayrıca kalıcı bir imzalama anahtarı gerekir.
+## Supabase kurulumu
 
-## Uygulama adresi
+1. `supabase/schema.sql` dosyasını Supabase projesinde çalıştırın.
+2. GitHub reposunda `Settings > Secrets and variables > Actions` bölümüne şu secret'ları ekleyin:
+   - `SUPABASE_URL`
+   - `SUPABASE_ANON_KEY`
+3. Actions içindeki **Selam APK Oluştur** iş akışını çalıştırın.
 
-https://selam-mesaj.hausone-2602.chatgpt.site
+Servis rolü anahtarını APK'ya veya GitHub secret'ına eklemeyin. Yalnızca istemciler için hazırlanmış anon/publishable anahtar kullanılmalıdır.
+
+## Sonraki sürümler
+
+Bildirimler, fotoğraf/dosya gönderimi, grup sohbeti, çevrimiçi durumu, sesli mesaj ve arama özellikleri çekirdek mesajlaşma doğrulandıktan sonra eklenecektir.

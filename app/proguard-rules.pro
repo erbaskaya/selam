@@ -1,1 +1,1 @@
-# Selam WebView kabuğu ek ProGuard kuralı gerektirmez.
+# Selam 1.1 için ek ProGuard kuralı gerekmiyor.
