@@ -60,7 +60,17 @@ jobs:
           SELAM_KEYSTORE_PASSWORD: ${{ secrets.SELAM_KEYSTORE_PASSWORD }}
           SELAM_KEY_ALIAS: ${{ secrets.SELAM_KEY_ALIAS }}
           SELAM_KEY_PASSWORD: ${{ secrets.SELAM_KEY_PASSWORD }}
-        run: gradle :app:assembleRelease --no-daemon --stacktrace
+        run: |
+          set -euo pipefail
+          SELAM_KEYSTORE_PASSWORD="$(printf '%s' "$SELAM_KEYSTORE_PASSWORD" | tr -d '\r\n')"
+          SELAM_KEY_ALIAS="$(printf '%s' "$SELAM_KEY_ALIAS" | tr -d '\r\n')"
+          SELAM_KEY_PASSWORD="$(printf '%s' "$SELAM_KEY_PASSWORD" | tr -d '\r\n')"
+          export SELAM_KEYSTORE_PASSWORD SELAM_KEY_ALIAS SELAM_KEY_PASSWORD
+          keytool -list \
+            -keystore "$SELAM_KEYSTORE_PATH" \
+            -storepass "$SELAM_KEYSTORE_PASSWORD" \
+            -alias "$SELAM_KEY_ALIAS" >/dev/null
+          gradle :app:assembleRelease --no-daemon --stacktrace
 
       - name: İmzalı APK'yı adlandır
         if: env.HAS_SIGNING == 'true'
