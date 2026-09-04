@@ -2,7 +2,7 @@
 
 Selam, bağımsız çalışan mavi temalı Android mesajlaşma uygulamasıdır. WebView kullanmaz ve ChatGPT oturumu istemez.
 
-## Sürüm 1.3 özellikleri
+## Sürüm 1.4 özellikleri
 
 - E-posta, şifre ve ücretli SMS olmadan cihaz hesabı
 - Ad ve telefon numarasıyla tek adımlı kurulum
@@ -19,6 +19,13 @@ Selam, bağımsız çalışan mavi temalı Android mesajlaşma uygulamasıdır. 
 - Cihazda güvenli oturum saklama
 - Veritabanı seviyesinde sohbet erişim kontrolü
 - Mavi tasarım ve tokalaşma ikonu
+- WhatsApp tarzı alt menü: Sohbetler, Güncellemeler, Topluluklar ve Aramalar
+- Sohbet arama, sabitleme, arşivleme ve sessize alma
+- Sağ üst üç nokta menüsü ve ayrıntılı kullanıcı ayarları
+- 24 saat sonra kaybolan metin durumları
+- Topluluk oluşturma ve üyelik görünümü
+- Sohbetten sesli/görüntülü görüşme odası başlatma ve arama geçmişi
+- Ana ekrandan kamera ile fotoğraf çekip sohbet seçerek gönderme
 
 ## Gizlilik ve güvenlik
 
@@ -40,4 +47,6 @@ Servis rolü anahtarını APK'ya veya GitHub secret'ına eklemeyin. Yalnızca is
 
 ## Sonraki sürümler
 
-Hesap taşıma/kurtarma, bildirimler, fotoğraf önizleme, çevrimiçi durumu, sesli mesaj ve sesli/görüntülü arama özellikleri sonraki sürümlere eklenebilir.
+Hesap taşıma/kurtarma, arka planda anlık bildirim, tam çözünürlüklü kamera,
+sesli mesaj, mesaj yanıtlama/düzenleme/tepki ve yerel WebRTC aramaları sonraki
+geliştirme paketidir.
