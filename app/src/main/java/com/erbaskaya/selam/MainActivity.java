@@ -16,7 +16,10 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.ContactsContract;
 import android.provider.OpenableColumns;
+import android.provider.MediaStore;
 import android.text.InputType;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.net.Uri;
 import android.view.Gravity;
 import android.view.View;
@@ -25,12 +28,14 @@ import android.view.inputmethod.InputMethodManager;
 import android.widget.BaseAdapter;
 import android.widget.Button;
 import android.widget.ArrayAdapter;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ProgressBar;
+import android.widget.PopupMenu;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -43,6 +48,8 @@ import com.journeyapps.barcodescanner.BarcodeEncoder;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -59,6 +66,8 @@ public class MainActivity extends Activity {
     private static final int REQUEST_CONTACTS = 410;
     private static final int REQUEST_GROUP_CONTACTS = 411;
     private static final int REQUEST_FILE = 412;
+    private static final int REQUEST_CAMERA = 413;
+    private static final int REQUEST_CAMERA_PERMISSION = 414;
     private static final long POLL_INTERVAL = 2_000L;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -72,6 +81,8 @@ public class MainActivity extends Activity {
     private ListView activeMessageList;
     private List<SupabaseClient.Message> activeMessages = new ArrayList<>();
     private Map<String, String> localContactNames = new LinkedHashMap<>();
+    private String pendingCameraChatId;
+    private String pendingCameraChatName;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -227,54 +238,462 @@ public class MainActivity extends Activity {
         screen = "home";
         activeChatId = null;
         LinearLayout page = vertical();
+        page.addView(mainHeader("Sohbetler"));
 
-        LinearLayout header = horizontal();
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(18), dp(13), dp(10), dp(13));
-        header.setBackgroundColor(NAVY);
-        ImageView icon = new ImageView(this);
-        icon.setImageResource(R.drawable.ic_launcher);
-        header.addView(icon, new LinearLayout.LayoutParams(dp(44), dp(44)));
-        TextView title = label("Selam", 25, Color.WHITE, true);
-        title.setPadding(dp(11), 0, 0, 0);
-        header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-        Button contacts = headerButton("Kişiler");
-        contacts.setOnClickListener(v -> showContacts());
-        header.addView(contacts, new LinearLayout.LayoutParams(dp(78), dp(44)));
-        Button group = headerButton("Grup");
-        group.setOnClickListener(v -> showCreateGroup());
-        header.addView(group, new LinearLayout.LayoutParams(dp(58), dp(44)));
-        Button qr = headerButton("QR");
-        qr.setOnClickListener(v -> showMyQr());
-        header.addView(qr, new LinearLayout.LayoutParams(dp(50), dp(44)));
-        page.addView(header);
+        EditText search = input("Sohbetlerde ara", InputType.TYPE_CLASS_TEXT);
+        search.setCompoundDrawablesWithIntrinsicBounds(android.R.drawable.ic_menu_search, 0, 0, 0);
+        search.setCompoundDrawablePadding(dp(10));
+        page.addView(search, margin(-1, dp(50), 16, 12, 16, 8));
 
-        TextView heading = label("Sohbetler", 21, TEXT, true);
-        heading.setPadding(dp(20), dp(22), dp(20), dp(12));
-        page.addView(heading);
         FrameLayout content = new FrameLayout(this);
         ListView list = plainList();
-        TextView empty = label("Henüz sohbet yok. Kişiler bölümünden rehberindeki Selam kullanıcılarını bul.", 16, MUTED, false);
+        TextView empty = label("Henüz sohbet yok. Sağ alttaki düğmeden rehberindeki Selam kullanıcılarını bul.", 16, MUTED, false);
         empty.setGravity(Gravity.CENTER);
         empty.setPadding(dp(34), dp(34), dp(34), dp(34));
         content.addView(list, new FrameLayout.LayoutParams(-1, -1));
         content.addView(empty, new FrameLayout.LayoutParams(-1, -1));
         list.setEmptyView(empty);
         page.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
+        addBottomNavigation(page, "chats");
         setPage(page);
-        loadChats(list);
+        setBusy(true);
+        api.listChats(uiCallback(allChats -> {
+            setBusy(false);
+            List<SupabaseClient.Chat> visible = new ArrayList<>();
+            for (SupabaseClient.Chat chat : allChats) if (!chat.archived) visible.add(chat);
+            bindChats(list, visible);
+            search.addTextChangedListener(new TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+                @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                    String query = s.toString().trim().toLowerCase(Locale.getDefault());
+                    List<SupabaseClient.Chat> filtered = new ArrayList<>();
+                    for (SupabaseClient.Chat chat : visible) {
+                        String name = preferredName(chat.displayName, chat.username).toLowerCase(Locale.getDefault());
+                        String message = chat.lastMessage == null ? "" : chat.lastMessage.toLowerCase(Locale.getDefault());
+                        if (query.isEmpty() || name.contains(query) || message.contains(query)) filtered.add(chat);
+                    }
+                    bindChats(list, filtered);
+                }
+                @Override public void afterTextChanged(Editable s) { }
+            });
+        }));
     }
 
     private void loadChats(ListView list) {
         setBusy(true);
         api.listChats(uiCallback(chats -> {
             setBusy(false);
-            list.setAdapter(new ChatAdapter(chats));
-            list.setOnItemClickListener((parent, view, position, id) -> {
-                SupabaseClient.Chat chat = chats.get(position);
-                openChat(chat.id, preferredName(chat.displayName, chat.username));
+            bindChats(list, chats);
+        }));
+    }
+
+    private void bindChats(ListView list, List<SupabaseClient.Chat> chats) {
+        list.setAdapter(new ChatAdapter(chats));
+        list.setOnItemClickListener((parent, view, position, id) -> {
+            SupabaseClient.Chat chat = chats.get(position);
+            openChat(chat.id, preferredName(chat.displayName, chat.username));
+        });
+        list.setOnItemLongClickListener((parent, view, position, id) -> {
+            showChatActions(view, chats.get(position));
+            return true;
+        });
+    }
+
+    private LinearLayout mainHeader(String section) {
+        LinearLayout header = horizontal();
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(dp(16), dp(10), dp(8), dp(10));
+        header.setBackgroundColor(NAVY);
+        ImageView icon = new ImageView(this);
+        icon.setImageResource(R.drawable.ic_launcher);
+        header.addView(icon, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        LinearLayout titles = vertical();
+        titles.setPadding(dp(10), 0, 0, 0);
+        titles.addView(label("Selam", 23, Color.WHITE, true));
+        titles.addView(label(section, 12, Color.rgb(184, 203, 230), false));
+        header.addView(titles, new LinearLayout.LayoutParams(0, -2, 1));
+        Button camera = headerButton("▣");
+        camera.setTextSize(22);
+        camera.setContentDescription("Kamera");
+        camera.setOnClickListener(v -> chooseCameraChat());
+        header.addView(camera, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        Button menu = headerButton("⋮");
+        menu.setTextSize(28);
+        menu.setContentDescription("Menü");
+        menu.setOnClickListener(this::showMainMenu);
+        header.addView(menu, new LinearLayout.LayoutParams(dp(44), dp(48)));
+        return header;
+    }
+
+    private void addBottomNavigation(LinearLayout page, String selected) {
+        LinearLayout nav = horizontal();
+        nav.setGravity(Gravity.CENTER);
+        nav.setPadding(dp(4), dp(5), dp(4), dp(5));
+        nav.setBackgroundColor(Color.WHITE);
+        addNavButton(nav, "▣\nSohbetler", "chats", selected, this::showHome);
+        addNavButton(nav, "◉\nGüncellemeler", "updates", selected, this::showUpdates);
+        addNavButton(nav, "♟\nTopluluklar", "communities", selected, this::showCommunities);
+        addNavButton(nav, "☎\nAramalar", "calls", selected, this::showCalls);
+        page.addView(nav, new LinearLayout.LayoutParams(-1, dp(68)));
+    }
+
+    private void addNavButton(LinearLayout nav, String title, String id,
+                              String selected, Runnable action) {
+        Button button = textButton(title);
+        button.setTextSize(11);
+        button.setGravity(Gravity.CENTER);
+        button.setTextColor(id.equals(selected) ? BLUE : TEXT);
+        button.setTypeface(Typeface.DEFAULT, id.equals(selected) ? Typeface.BOLD : Typeface.NORMAL);
+        button.setBackground(id.equals(selected)
+                ? rounded(Color.rgb(229, 239, 255), Color.rgb(229, 239, 255), 16)
+                : rounded(Color.WHITE, Color.WHITE, 16));
+        button.setOnClickListener(v -> action.run());
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(58), 1);
+        params.setMargins(dp(2), 0, dp(2), 0);
+        nav.addView(button, params);
+    }
+
+    private void showMainMenu(View anchor) {
+        PopupMenu menu = new PopupMenu(this, anchor);
+        menu.getMenu().add("Yeni sohbet");
+        menu.getMenu().add("Yeni grup");
+        menu.getMenu().add("Yeni topluluk");
+        menu.getMenu().add("Arşivlenmiş sohbetler");
+        menu.getMenu().add("QR kodum");
+        menu.getMenu().add("Ayarlar");
+        menu.setOnMenuItemClickListener(item -> {
+            String title = item.getTitle().toString();
+            if ("Yeni sohbet".equals(title)) showContacts();
+            else if ("Yeni grup".equals(title)) showCreateGroup();
+            else if ("Yeni topluluk".equals(title)) showCreateCommunityDialog();
+            else if ("Arşivlenmiş sohbetler".equals(title)) showArchivedChats();
+            else if ("QR kodum".equals(title)) showMyQr();
+            else if ("Ayarlar".equals(title)) showSettings();
+            return true;
+        });
+        menu.show();
+    }
+
+    private void showChatActions(View anchor, SupabaseClient.Chat chat) {
+        PopupMenu menu = new PopupMenu(this, anchor);
+        menu.getMenu().add(chat.pinned ? "Sabitlemeyi kaldır" : "Sohbeti sabitle");
+        menu.getMenu().add(chat.archived ? "Arşivden çıkar" : "Arşivle");
+        menu.getMenu().add("8 saat sessize al");
+        menu.getMenu().add("Sessizi kaldır");
+        menu.getMenu().add("Sohbeti temizle");
+        menu.setOnMenuItemClickListener(item -> {
+            String title = item.getTitle().toString();
+            if (title.contains("Sabitle")) updateChatState(chat, null, !chat.pinned, null);
+            else if (title.contains("Arşiv")) updateChatState(chat, !chat.archived, null, null);
+            else if (title.startsWith("8")) updateChatState(chat, null, null, 8);
+            else if (title.startsWith("Sessizi")) updateChatState(chat, null, null, 0);
+            else confirmDeleteChat(chat.id, preferredName(chat.displayName, chat.username));
+            return true;
+        });
+        menu.show();
+    }
+
+    private void updateChatState(SupabaseClient.Chat chat, Boolean archived,
+                                 Boolean pinned, Integer muteHours) {
+        setBusy(true);
+        api.setChatState(chat.id, archived, pinned, muteHours, uiCallback(done -> {
+            setBusy(false);
+            toast("Sohbet ayarı güncellendi.");
+            if (chat.archived) showArchivedChats(); else showHome();
+        }));
+    }
+
+    private void showArchivedChats() {
+        stopPolling();
+        screen = "archived";
+        LinearLayout page = vertical();
+        page.addView(topBar("Arşivlenmiş sohbetler", this::showHome));
+        ListView list = plainList();
+        TextView empty = label("Arşivlenmiş sohbet yok.", 16, MUTED, false);
+        empty.setGravity(Gravity.CENTER);
+        list.setEmptyView(empty);
+        FrameLayout body = new FrameLayout(this);
+        body.addView(list, new FrameLayout.LayoutParams(-1, -1));
+        body.addView(empty, new FrameLayout.LayoutParams(-1, -1));
+        page.addView(body, new LinearLayout.LayoutParams(-1, 0, 1));
+        setPage(page);
+        setBusy(true);
+        api.listChats(uiCallback(chats -> {
+            setBusy(false);
+            List<SupabaseClient.Chat> archived = new ArrayList<>();
+            for (SupabaseClient.Chat chat : chats) if (chat.archived) archived.add(chat);
+            bindChats(list, archived);
+        }));
+    }
+
+    private void showUpdates() {
+        stopPolling();
+        screen = "updates";
+        LinearLayout page = vertical();
+        page.addView(mainHeader("Güncellemeler"));
+        Button add = primaryButton("＋ Durum paylaş");
+        add.setOnClickListener(v -> showCreateStatusDialog());
+        page.addView(add, margin(-1, dp(50), 16, 12, 16, 8));
+        TextView hint = label("Durumlar 24 saat sonra otomatik kaybolur.", 13, MUTED, false);
+        hint.setPadding(dp(18), dp(2), dp(18), dp(6));
+        page.addView(hint);
+        ListView list = plainList();
+        page.addView(list, new LinearLayout.LayoutParams(-1, 0, 1));
+        addBottomNavigation(page, "updates");
+        setPage(page);
+        setBusy(true);
+        api.listStatuses(uiCallback(statuses -> {
+            setBusy(false);
+            list.setAdapter(new StatusAdapter(statuses));
+            list.setOnItemClickListener((p, v, position, id) -> showStatus(statuses.get(position)));
+            list.setOnItemLongClickListener((p, v, position, id) -> {
+                SupabaseClient.StatusUpdate status = statuses.get(position);
+                if (status.mine) confirmDeleteStatus(status);
+                return true;
             });
         }));
+    }
+
+    private void showCreateStatusDialog() {
+        final String[] colors = {"#1969E6", "#135B9A", "#0F8B8D", "#7B2CBF", "#C44536"};
+        LinearLayout form = vertical();
+        form.setPadding(dp(18), dp(8), dp(18), 0);
+        EditText body = input("Ne paylaşmak istersin?", InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        body.setMinLines(4);
+        form.addView(body, new LinearLayout.LayoutParams(-1, -2));
+        new AlertDialog.Builder(this).setTitle("Yeni durum")
+                .setView(form).setSingleChoiceItems(new String[]{"Mavi", "Lacivert", "Turkuaz", "Mor", "Kırmızı"}, 0, null)
+                .setNegativeButton("Vazgeç", null)
+                .setPositiveButton("Paylaş", (dialog, which) -> {
+                    int selected = ((AlertDialog) dialog).getListView().getCheckedItemPosition();
+                    String text = body.getText().toString().trim();
+                    if (text.isEmpty()) { toast("Durum metnini yazın."); return; }
+                    setBusy(true);
+                    api.createStatus(text, colors[Math.max(0, selected)], uiCallback(done -> {
+                        setBusy(false); toast("Durum paylaşıldı."); showUpdates();
+                    }));
+                }).show();
+    }
+
+    private void showStatus(SupabaseClient.StatusUpdate status) {
+        TextView view = label(status.body, 25, Color.WHITE, true);
+        view.setGravity(Gravity.CENTER);
+        view.setPadding(dp(28), dp(42), dp(28), dp(42));
+        try { view.setBackgroundColor(Color.parseColor(status.color)); }
+        catch (Exception ignored) { view.setBackgroundColor(BLUE); }
+        new AlertDialog.Builder(this)
+                .setTitle((status.mine ? "Durumum" : status.displayName) + " • " + time(status.createdAt))
+                .setView(view).setPositiveButton("Kapat", null).show();
+    }
+
+    private void confirmDeleteStatus(SupabaseClient.StatusUpdate status) {
+        new AlertDialog.Builder(this).setTitle("Durum silinsin mi?")
+                .setMessage(status.body).setNegativeButton("Vazgeç", null)
+                .setPositiveButton("Sil", (d, w) -> {
+                    setBusy(true);
+                    api.deleteStatus(status.id, uiCallback(done -> { setBusy(false); showUpdates(); }));
+                }).show();
+    }
+
+    private void showCommunities() {
+        stopPolling();
+        screen = "communities";
+        LinearLayout page = vertical();
+        page.addView(mainHeader("Topluluklar"));
+        Button add = primaryButton("＋ Yeni topluluk");
+        add.setOnClickListener(v -> showCreateCommunityDialog());
+        page.addView(add, margin(-1, dp(50), 16, 12, 16, 10));
+        TextView info = label("Bir okul, aile, ekip veya proje için sohbetlerini tek çatı altında düzenle.", 14, MUTED, false);
+        info.setPadding(dp(18), dp(4), dp(18), dp(10));
+        page.addView(info);
+        ListView list = plainList();
+        page.addView(list, new LinearLayout.LayoutParams(-1, 0, 1));
+        addBottomNavigation(page, "communities");
+        setPage(page);
+        setBusy(true);
+        api.listCommunities(uiCallback(items -> {
+            setBusy(false);
+            list.setAdapter(new CommunityAdapter(items));
+        }));
+    }
+
+    private void showCreateCommunityDialog() {
+        LinearLayout form = vertical();
+        form.setPadding(dp(18), dp(8), dp(18), 0);
+        EditText name = input("Topluluk adı", InputType.TYPE_CLASS_TEXT);
+        EditText description = input("Kısa açıklama", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        form.addView(name, margin(-1, dp(54), 0, 0, 0, 10));
+        form.addView(description, margin(-1, dp(80), 0, 0, 0, 0));
+        new AlertDialog.Builder(this).setTitle("Yeni topluluk").setView(form)
+                .setNegativeButton("Vazgeç", null)
+                .setPositiveButton("Oluştur", (d, w) -> {
+                    if (name.getText().toString().trim().length() < 2) {
+                        toast("Topluluk adını yazın."); return;
+                    }
+                    setBusy(true);
+                    api.createCommunity(name.getText().toString(), description.getText().toString(),
+                            uiCallback(done -> { setBusy(false); toast("Topluluk oluşturuldu."); showCommunities(); }));
+                }).show();
+    }
+
+    private void showCalls() {
+        stopPolling();
+        screen = "calls";
+        LinearLayout page = vertical();
+        page.addView(mainHeader("Aramalar"));
+        Button start = primaryButton("＋ Yeni arama");
+        start.setOnClickListener(v -> chooseCallChat());
+        page.addView(start, margin(-1, dp(50), 16, 12, 16, 8));
+        TextView info = label("Sesli ve görüntülü görüşmeler güvenli, benzersiz bir görüşme odasında açılır.", 13, MUTED, false);
+        info.setPadding(dp(18), dp(2), dp(18), dp(8));
+        page.addView(info);
+        ListView list = plainList();
+        page.addView(list, new LinearLayout.LayoutParams(-1, 0, 1));
+        addBottomNavigation(page, "calls");
+        setPage(page);
+        setBusy(true);
+        api.listCalls(uiCallback(calls -> {
+            setBusy(false);
+            list.setAdapter(new CallAdapter(calls));
+            list.setOnItemClickListener((p, v, position, id) -> {
+                SupabaseClient.CallEvent call = calls.get(position);
+                if ("active".equals(call.state)) openMeeting(call.roomName, call.mode);
+                else toast("Bu arama sona ermiş.");
+            });
+            list.setOnItemLongClickListener((p, v, position, id) -> {
+                SupabaseClient.CallEvent call = calls.get(position);
+                if (!"active".equals(call.state)) return true;
+                new AlertDialog.Builder(this).setTitle("Aramayı bitir")
+                        .setMessage(call.displayName + " görüşmesi sonlandırılsın mı?")
+                        .setNegativeButton("Vazgeç", null)
+                        .setPositiveButton("Bitir", (d, w) -> {
+                            setBusy(true);
+                            api.endCall(call.id, uiCallback(done -> { setBusy(false); showCalls(); }));
+                        }).show();
+                return true;
+            });
+        }));
+    }
+
+    private void chooseCallChat() {
+        setBusy(true);
+        api.listChats(uiCallback(chats -> {
+            setBusy(false);
+            if (chats.isEmpty()) { toast("Önce bir sohbet başlatın."); return; }
+            String[] names = new String[chats.size()];
+            for (int i = 0; i < chats.size(); i++) names[i] = preferredName(chats.get(i).displayName, chats.get(i).username);
+            new AlertDialog.Builder(this).setTitle("Kimi aramak istersin?")
+                    .setItems(names, (d, which) -> chooseCallMode(chats.get(which).id)).show();
+        }));
+    }
+
+    private void chooseCallMode(String chatId) {
+        new AlertDialog.Builder(this).setTitle("Arama türü")
+                .setItems(new String[]{"Sesli arama", "Görüntülü arama"}, (d, which) ->
+                        startCall(chatId, which == 0 ? "voice" : "video")).show();
+    }
+
+    private void startCall(String chatId, String mode) {
+        setBusy(true);
+        api.startCall(chatId, mode, uiCallback(call -> {
+            setBusy(false);
+            openMeeting(call.roomName, mode);
+        }));
+    }
+
+    private void openMeeting(String roomName, String mode) {
+        try {
+            Uri uri = Uri.parse("https://meet.jit.si/" + Uri.encode(roomName)
+                    + ("voice".equals(mode) ? "#config.startWithVideoMuted=true" : ""));
+            startActivity(new Intent(Intent.ACTION_VIEW, uri));
+        } catch (Exception exception) {
+            toast("Görüşme açılamadı.");
+        }
+    }
+
+    private void showSettings() {
+        stopPolling();
+        screen = "settings";
+        LinearLayout page = vertical();
+        page.addView(topBar("Ayarlar", this::showHome));
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout form = vertical();
+        form.setPadding(dp(18), dp(18), dp(18), dp(28));
+        scroll.addView(form);
+        page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        setPage(page);
+        setBusy(true);
+        api.getSettings(uiCallback(settings -> {
+            setBusy(false);
+            form.addView(avatar(settings.displayName, 70), margin(dp(70), dp(70), 0, 0, 0, 12));
+            EditText name = input("Adınız", InputType.TYPE_CLASS_TEXT);
+            name.setText(settings.displayName);
+            form.addView(name, margin(-1, dp(54), 0, 0, 0, 10));
+            EditText about = input("Hakkımda", InputType.TYPE_CLASS_TEXT);
+            about.setText(settings.about);
+            form.addView(about, margin(-1, dp(54), 0, 0, 0, 14));
+            CheckBox receipts = settingCheck("Okundu bilgisi", settings.readReceipts);
+            CheckBox lastSeen = settingCheck("Son görülmemi göster", settings.showLastSeen);
+            CheckBox notifications = settingCheck("Mesaj bildirimleri", settings.notifications);
+            CheckBox callNotifications = settingCheck("Arama bildirimleri", settings.callNotifications);
+            CheckBox compact = settingCheck("Kompakt sohbet görünümü", settings.compactMode);
+            form.addView(receipts); form.addView(lastSeen); form.addView(notifications);
+            form.addView(callNotifications); form.addView(compact);
+            TextView privacy = label("Gizlilik notu: telefon numaran açık olarak saklanmaz; kişiler eşleştirilirken tek yönlü özeti kullanılır.", 13, MUTED, false);
+            privacy.setPadding(dp(12), dp(12), dp(12), dp(12));
+            privacy.setBackground(rounded(Color.rgb(232, 241, 255), Color.rgb(202, 220, 248), 12));
+            form.addView(privacy, margin(-1, -2, 0, 14, 0, 14));
+            Button qr = textButton("Güvenlik ve QR kodum");
+            qr.setBackground(rounded(Color.WHITE, BORDER, 14));
+            qr.setOnClickListener(v -> showMyQr());
+            form.addView(qr, margin(-1, dp(52), 0, 0, 0, 10));
+            Button save = primaryButton("Ayarları kaydet");
+            save.setOnClickListener(v -> {
+                SupabaseClient.Settings changed = new SupabaseClient.Settings(
+                        name.getText().toString().trim(), about.getText().toString().trim(),
+                        receipts.isChecked(), lastSeen.isChecked(), notifications.isChecked(),
+                        callNotifications.isChecked(), compact.isChecked());
+                setBusy(true);
+                api.updateSettings(changed, uiCallback(done -> {
+                    setBusy(false); toast("Ayarlar kaydedildi."); loadProfile();
+                }));
+            });
+            form.addView(save, new LinearLayout.LayoutParams(-1, dp(54)));
+        }));
+    }
+
+    private CheckBox settingCheck(String text, boolean checked) {
+        CheckBox box = new CheckBox(this);
+        box.setText(text);
+        box.setTextColor(TEXT);
+        box.setTextSize(16);
+        box.setChecked(checked);
+        box.setPadding(dp(10), dp(8), dp(10), dp(8));
+        return box;
+    }
+
+    private void chooseCameraChat() {
+        setBusy(true);
+        api.listChats(uiCallback(chats -> {
+            setBusy(false);
+            if (chats.isEmpty()) { toast("Fotoğraf göndermek için önce bir sohbet başlatın."); return; }
+            String[] names = new String[chats.size()];
+            for (int i = 0; i < chats.size(); i++) names[i] = preferredName(chats.get(i).displayName, chats.get(i).username);
+            new AlertDialog.Builder(this).setTitle("Fotoğrafı hangi sohbete gönderelim?")
+                    .setItems(names, (d, which) -> {
+                        pendingCameraChatId = chats.get(which).id;
+                        pendingCameraChatName = names[which];
+                        if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) launchCamera();
+                        else requestPermissions(new String[]{Manifest.permission.CAMERA}, REQUEST_CAMERA_PERMISSION);
+                    }).show();
+        }));
+    }
+
+    private void launchCamera() {
+        Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+        if (intent.resolveActivity(getPackageManager()) != null) startActivityForResult(intent, REQUEST_CAMERA);
+        else toast("Kamera uygulaması bulunamadı.");
     }
 
     private void showContacts() {
@@ -552,6 +971,25 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == REQUEST_CAMERA) {
+            if (resultCode == RESULT_OK && data != null && pendingCameraChatId != null) {
+                Object image = data.getExtras() == null ? null : data.getExtras().get("data");
+                if (image instanceof Bitmap) {
+                    ByteArrayOutputStream output = new ByteArrayOutputStream();
+                    ((Bitmap) image).compress(Bitmap.CompressFormat.JPEG, 90, output);
+                    byte[] bytes = output.toByteArray();
+                    setBusy(true);
+                    api.sendFile(pendingCameraChatId, new ByteArrayInputStream(bytes),
+                            "Selam-Fotograf-" + System.currentTimeMillis() + ".jpg",
+                            "image/jpeg", bytes.length, uiCallback(done -> {
+                                setBusy(false);
+                                toast("Fotoğraf " + pendingCameraChatName + " sohbetine gönderildi.");
+                                openChat(pendingCameraChatId, pendingCameraChatName);
+                            }));
+                }
+            }
+            return;
+        }
         if (requestCode == REQUEST_FILE) {
             if (resultCode == RESULT_OK && data != null && data.getData() != null) {
                 sendPickedFile(data.getData());
@@ -594,6 +1032,12 @@ public class MainActivity extends Activity {
             } else {
                 toast("Grup oluşturmak için rehber erişimi gereklidir.");
             }
+        } else if (requestCode == REQUEST_CAMERA_PERMISSION) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                launchCamera();
+            } else {
+                toast("Fotoğraf çekebilmek için kamera izni gereklidir.");
+            }
         }
     }
 
@@ -604,10 +1048,37 @@ public class MainActivity extends Activity {
         activeMessages = new ArrayList<>();
         LinearLayout page = vertical();
         LinearLayout header = topBar(chatName, this::showHome);
-        Button delete = headerButton("Sil");
-        delete.setTextColor(Color.rgb(255, 142, 142));
-        delete.setOnClickListener(v -> confirmDeleteChat(chatId, chatName));
-        header.addView(delete, new LinearLayout.LayoutParams(dp(52), dp(48)));
+        Button video = headerButton("▣");
+        video.setTextSize(20);
+        video.setContentDescription("Görüntülü ara");
+        video.setOnClickListener(v -> startCall(chatId, "video"));
+        header.addView(video, new LinearLayout.LayoutParams(dp(46), dp(48)));
+        Button voice = headerButton("☎");
+        voice.setTextSize(20);
+        voice.setContentDescription("Sesli ara");
+        voice.setOnClickListener(v -> startCall(chatId, "voice"));
+        header.addView(voice, new LinearLayout.LayoutParams(dp(46), dp(48)));
+        Button menu = headerButton("⋮");
+        menu.setTextSize(27);
+        menu.setContentDescription("Sohbet menüsü");
+        menu.setOnClickListener(v -> {
+            PopupMenu popup = new PopupMenu(this, v);
+            popup.getMenu().add("Dosya gönder");
+            popup.getMenu().add("QR ile doğrula");
+            popup.getMenu().add("8 saat sessize al");
+            popup.getMenu().add("Sohbeti temizle");
+            popup.setOnMenuItemClickListener(item -> {
+                String choice = item.getTitle().toString();
+                if (choice.startsWith("Dosya")) pickFile();
+                else if (choice.startsWith("QR")) showMyQr();
+                else if (choice.startsWith("8")) api.setChatState(chatId, null, null, 8,
+                        uiCallback(done -> toast("Sohbet 8 saat sessize alındı.")));
+                else confirmDeleteChat(chatId, chatName);
+                return true;
+            });
+            popup.show();
+        });
+        header.addView(menu, new LinearLayout.LayoutParams(dp(42), dp(48)));
         page.addView(header);
         activeMessageList = plainList();
         activeMessageList.setTranscriptMode(ListView.TRANSCRIPT_MODE_ALWAYS_SCROLL);
@@ -958,7 +1429,10 @@ public class MainActivity extends Activity {
     @Override
     public void onBackPressed() {
         if ("chat".equals(screen) || "contacts".equals(screen) || "group".equals(screen)
-                || "search".equals(screen) || "profile".equals(screen)) showHome();
+                || "search".equals(screen) || "profile".equals(screen)
+                || "updates".equals(screen) || "communities".equals(screen)
+                || "calls".equals(screen) || "settings".equals(screen)
+                || "archived".equals(screen)) showHome();
         else super.onBackPressed();
     }
 
@@ -979,8 +1453,11 @@ public class MainActivity extends Activity {
             SupabaseClient.Chat chat = items.get(position);
             String name = "group".equals(chat.kind) ? chat.displayName
                     : preferredName(chat.displayName, chat.username);
-            LinearLayout row = personRow(name, chat.lastMessage == null || chat.lastMessage.isEmpty()
-                    ? "Yeni sohbet" : chat.lastMessage, 52);
+            String subtitle = chat.lastMessage == null || chat.lastMessage.isEmpty()
+                    ? "Yeni sohbet" : chat.lastMessage;
+            if (chat.pinned) subtitle = "📌 " + subtitle;
+            if (chat.mutedUntil != null && !chat.mutedUntil.isEmpty()) subtitle = "🔕 " + subtitle;
+            LinearLayout row = personRow(name, subtitle, 52);
             row.addView(label(time(chat.lastMessageAt), 12, MUTED, false));
             row.setLayoutParams(rowParams(78));
             return row;
@@ -1018,6 +1495,58 @@ public class MainActivity extends Activity {
             LinearLayout row = personRow(name, "@" + person.username, 48);
             row.addView(label("Mesaj →", 14, BLUE, true));
             row.setLayoutParams(rowParams(72));
+            return row;
+        }
+    }
+
+    private final class StatusAdapter extends BaseAdapter {
+        private final List<SupabaseClient.StatusUpdate> items;
+        StatusAdapter(List<SupabaseClient.StatusUpdate> items) { this.items = items; }
+        @Override public int getCount() { return items.size(); }
+        @Override public Object getItem(int position) { return items.get(position); }
+        @Override public long getItemId(int position) { return items.get(position).id; }
+        @Override public View getView(int position, View convertView, ViewGroup parent) {
+            SupabaseClient.StatusUpdate item = items.get(position);
+            LinearLayout row = personRow(item.mine ? "Durumum" : item.displayName, item.body, 50);
+            row.addView(label(time(item.createdAt), 12, MUTED, false));
+            row.setLayoutParams(rowParams(76));
+            return row;
+        }
+    }
+
+    private final class CommunityAdapter extends BaseAdapter {
+        private final List<SupabaseClient.Community> items;
+        CommunityAdapter(List<SupabaseClient.Community> items) { this.items = items; }
+        @Override public int getCount() { return items.size(); }
+        @Override public Object getItem(int position) { return items.get(position); }
+        @Override public long getItemId(int position) { return position; }
+        @Override public View getView(int position, View convertView, ViewGroup parent) {
+            SupabaseClient.Community item = items.get(position);
+            String subtitle = item.description == null || item.description.isEmpty()
+                    ? item.memberCount + " üye" : item.description + " • " + item.memberCount + " üye";
+            LinearLayout row = personRow(item.name, subtitle, 52);
+            row.addView(label("Topluluk", 12, BLUE, true));
+            row.setLayoutParams(rowParams(78));
+            return row;
+        }
+    }
+
+    private final class CallAdapter extends BaseAdapter {
+        private final List<SupabaseClient.CallEvent> items;
+        CallAdapter(List<SupabaseClient.CallEvent> items) { this.items = items; }
+        @Override public int getCount() { return items.size(); }
+        @Override public Object getItem(int position) { return items.get(position); }
+        @Override public long getItemId(int position) { return position; }
+        @Override public View getView(int position, View convertView, ViewGroup parent) {
+            SupabaseClient.CallEvent item = items.get(position);
+            String direction = item.outgoing ? "Giden" : "Gelen";
+            String type = "video".equals(item.mode) ? "görüntülü" : "sesli";
+            String state = "active".equals(item.state) ? " • Katılabilirsin" : " • Sona erdi";
+            LinearLayout row = personRow(item.displayName,
+                    direction + " " + type + " arama • " + time(item.startedAt) + state, 50);
+            row.addView(label("video".equals(item.mode) ? "▣" : "☎", 20,
+                    "active".equals(item.state) ? BLUE : MUTED, true));
+            row.setLayoutParams(rowParams(76));
             return row;
         }
     }

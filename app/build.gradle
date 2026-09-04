@@ -10,8 +10,8 @@ android {
         applicationId "com.erbaskaya.selam"
         minSdk 26
         targetSdk 36
-        versionCode 5
-        versionName "1.3.0"
+        versionCode 6
+        versionName "1.4.0"
 
         def supabaseUrl = System.getenv("SUPABASE_URL") ?: "https://czaangjaxdffliwigcbx.supabase.co"
         // Supabase publishable anahtarı mobil istemcilerde açıkça kullanılmak üzere tasarlanmıştır.
@@ -24,9 +24,22 @@ android {
         buildConfig true
     }
 
+    signingConfigs {
+        release {
+            def signingPath = System.getenv("SELAM_KEYSTORE_PATH")
+            if (signingPath) {
+                storeFile file(signingPath)
+                storePassword System.getenv("SELAM_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("SELAM_KEY_ALIAS")
+                keyPassword System.getenv("SELAM_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
+            signingConfig signingConfigs.release
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
     }
