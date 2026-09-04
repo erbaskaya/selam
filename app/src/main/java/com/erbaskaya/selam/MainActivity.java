@@ -123,12 +123,6 @@ public class MainActivity extends Activity {
         if (updateManager != null) updateManager.resumeInstallIfReady();
     }
 
-    @Override
-    protected void onDestroy() {
-        if (updateManager != null) updateManager.close();
-        super.onDestroy();
-    }
-
     private void startDeviceAccount() {
         showBoot("Cihaz hesabın hazırlanıyor…");
         if (api.hasSession()) {
@@ -1447,6 +1441,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         stopPolling();
+        if (updateManager != null) updateManager.close();
         api.close();
         super.onDestroy();
     }
