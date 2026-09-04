@@ -109,8 +109,6 @@ struct MainTabs: View {
                 .tabItem { Label("Güncellemeler", systemImage: "circle.dashed") }
             PlaceholderView(title: "Topluluklar", icon: "person.3.fill")
                 .tabItem { Label("Topluluklar", systemImage: "person.3.fill") }
-            PlaceholderView(title: "Aramalar", icon: "phone.fill")
-                .tabItem { Label("Aramalar", systemImage: "phone.fill") }
         }
     }
 }

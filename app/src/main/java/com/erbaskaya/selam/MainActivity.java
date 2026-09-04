@@ -382,7 +382,6 @@ public class MainActivity extends Activity {
         addNavButton(nav, "▣\nSohbetler", "chats", selected, this::showHome);
         addNavButton(nav, "◉\nGüncellemeler", "updates", selected, this::showUpdates);
         addNavButton(nav, "♟\nTopluluklar", "communities", selected, this::showCommunities);
-        addNavButton(nav, "☎\nAramalar", "calls", selected, this::showCalls);
         page.addView(nav, new LinearLayout.LayoutParams(-1, dp(68)));
     }
 
@@ -586,81 +585,6 @@ public class MainActivity extends Activity {
                 }).show();
     }
 
-    private void showCalls() {
-        stopPolling();
-        screen = "calls";
-        LinearLayout page = vertical();
-        page.addView(mainHeader("Aramalar"));
-        Button start = primaryButton("＋ Yeni arama");
-        start.setOnClickListener(v -> chooseCallChat());
-        page.addView(start, margin(-1, dp(50), 16, 12, 16, 8));
-        TextView info = label("Sesli ve görüntülü görüşmeler güvenli, benzersiz bir görüşme odasında açılır.", 13, MUTED, false);
-        info.setPadding(dp(18), dp(2), dp(18), dp(8));
-        page.addView(info);
-        ListView list = plainList();
-        page.addView(list, new LinearLayout.LayoutParams(-1, 0, 1));
-        addBottomNavigation(page, "calls");
-        setPage(page);
-        setBusy(true);
-        api.listCalls(uiCallback(calls -> {
-            setBusy(false);
-            list.setAdapter(new CallAdapter(calls));
-            list.setOnItemClickListener((p, v, position, id) -> {
-                SupabaseClient.CallEvent call = calls.get(position);
-                if ("active".equals(call.state)) openMeeting(call.roomName, call.mode);
-                else toast("Bu arama sona ermiş.");
-            });
-            list.setOnItemLongClickListener((p, v, position, id) -> {
-                SupabaseClient.CallEvent call = calls.get(position);
-                if (!"active".equals(call.state)) return true;
-                new AlertDialog.Builder(this).setTitle("Aramayı bitir")
-                        .setMessage(call.displayName + " görüşmesi sonlandırılsın mı?")
-                        .setNegativeButton("Vazgeç", null)
-                        .setPositiveButton("Bitir", (d, w) -> {
-                            setBusy(true);
-                            api.endCall(call.id, uiCallback(done -> { setBusy(false); showCalls(); }));
-                        }).show();
-                return true;
-            });
-        }));
-    }
-
-    private void chooseCallChat() {
-        setBusy(true);
-        api.listChats(uiCallback(chats -> {
-            setBusy(false);
-            if (chats.isEmpty()) { toast("Önce bir sohbet başlatın."); return; }
-            String[] names = new String[chats.size()];
-            for (int i = 0; i < chats.size(); i++) names[i] = preferredName(chats.get(i).displayName, chats.get(i).username);
-            new AlertDialog.Builder(this).setTitle("Kimi aramak istersin?")
-                    .setItems(names, (d, which) -> chooseCallMode(chats.get(which).id)).show();
-        }));
-    }
-
-    private void chooseCallMode(String chatId) {
-        new AlertDialog.Builder(this).setTitle("Arama türü")
-                .setItems(new String[]{"Sesli arama", "Görüntülü arama"}, (d, which) ->
-                        startCall(chatId, which == 0 ? "voice" : "video")).show();
-    }
-
-    private void startCall(String chatId, String mode) {
-        setBusy(true);
-        api.startCall(chatId, mode, uiCallback(call -> {
-            setBusy(false);
-            openMeeting(call.roomName, mode);
-        }));
-    }
-
-    private void openMeeting(String roomName, String mode) {
-        try {
-            Uri uri = Uri.parse("https://meet.jit.si/" + Uri.encode(roomName)
-                    + ("voice".equals(mode) ? "#config.startWithVideoMuted=true" : ""));
-            startActivity(new Intent(Intent.ACTION_VIEW, uri));
-        } catch (Exception exception) {
-            toast("Görüşme açılamadı.");
-        }
-    }
-
     private void showSettings() {
         stopPolling();
         screen = "settings";
@@ -685,10 +609,9 @@ public class MainActivity extends Activity {
             CheckBox receipts = settingCheck("Okundu bilgisi", settings.readReceipts);
             CheckBox lastSeen = settingCheck("Son görülmemi göster", settings.showLastSeen);
             CheckBox notifications = settingCheck("Mesaj bildirimleri", settings.notifications);
-            CheckBox callNotifications = settingCheck("Arama bildirimleri", settings.callNotifications);
             CheckBox compact = settingCheck("Kompakt sohbet görünümü", settings.compactMode);
             form.addView(receipts); form.addView(lastSeen); form.addView(notifications);
-            form.addView(callNotifications); form.addView(compact);
+            form.addView(compact);
             TextView privacy = label("Gizlilik notu: telefon numaran açık olarak saklanmaz; kişiler eşleştirilirken tek yönlü özeti kullanılır.", 13, MUTED, false);
             privacy.setPadding(dp(12), dp(12), dp(12), dp(12));
             privacy.setBackground(rounded(Color.rgb(232, 241, 255), Color.rgb(202, 220, 248), 12));
@@ -721,7 +644,7 @@ public class MainActivity extends Activity {
                 SupabaseClient.Settings changed = new SupabaseClient.Settings(
                         name.getText().toString().trim(), about.getText().toString().trim(),
                         receipts.isChecked(), lastSeen.isChecked(), notifications.isChecked(),
-                        callNotifications.isChecked(), compact.isChecked());
+                        settings.callNotifications, compact.isChecked());
                 setBusy(true);
                 api.updateSettings(changed, uiCallback(done -> {
                     setBusy(false); toast("Ayarlar kaydedildi."); loadProfile();
@@ -1116,16 +1039,6 @@ public class MainActivity extends Activity {
         activeMessages = new ArrayList<>();
         LinearLayout page = vertical();
         LinearLayout header = topBar(chatName, this::showHome);
-        Button video = headerButton("▣");
-        video.setTextSize(20);
-        video.setContentDescription("Görüntülü ara");
-        video.setOnClickListener(v -> startCall(chatId, "video"));
-        header.addView(video, new LinearLayout.LayoutParams(dp(46), dp(48)));
-        Button voice = headerButton("☎");
-        voice.setTextSize(20);
-        voice.setContentDescription("Sesli ara");
-        voice.setOnClickListener(v -> startCall(chatId, "voice"));
-        header.addView(voice, new LinearLayout.LayoutParams(dp(46), dp(48)));
         Button menu = headerButton("⋮");
         menu.setTextSize(27);
         menu.setContentDescription("Sohbet menüsü");
@@ -1507,7 +1420,7 @@ public class MainActivity extends Activity {
         if ("chat".equals(screen) || "contacts".equals(screen) || "group".equals(screen)
                 || "search".equals(screen) || "profile".equals(screen)
                 || "updates".equals(screen) || "communities".equals(screen)
-                || "calls".equals(screen) || "settings".equals(screen)
+                || "settings".equals(screen)
                 || "archived".equals(screen)) showHome();
         else super.onBackPressed();
     }
@@ -1603,26 +1516,6 @@ public class MainActivity extends Activity {
             LinearLayout row = personRow(item.name, subtitle, 52);
             row.addView(label("Topluluk", 12, BLUE, true));
             row.setLayoutParams(rowParams(78));
-            return row;
-        }
-    }
-
-    private final class CallAdapter extends BaseAdapter {
-        private final List<SupabaseClient.CallEvent> items;
-        CallAdapter(List<SupabaseClient.CallEvent> items) { this.items = items; }
-        @Override public int getCount() { return items.size(); }
-        @Override public Object getItem(int position) { return items.get(position); }
-        @Override public long getItemId(int position) { return position; }
-        @Override public View getView(int position, View convertView, ViewGroup parent) {
-            SupabaseClient.CallEvent item = items.get(position);
-            String direction = item.outgoing ? "Giden" : "Gelen";
-            String type = "video".equals(item.mode) ? "görüntülü" : "sesli";
-            String state = "active".equals(item.state) ? " • Katılabilirsin" : " • Sona erdi";
-            LinearLayout row = personRow(item.displayName,
-                    direction + " " + type + " arama • " + time(item.startedAt) + state, 50);
-            row.addView(label("video".equals(item.mode) ? "▣" : "☎", 20,
-                    "active".equals(item.state) ? BLUE : MUTED, true));
-            row.setLayoutParams(rowParams(76));
             return row;
         }
     }

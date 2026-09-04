@@ -164,29 +164,6 @@ final class SupabaseClient {
         }
     }
 
-    static final class CallEvent {
-        final String id;
-        final String chatId;
-        final String displayName;
-        final String mode;
-        final String state;
-        final String roomName;
-        final String startedAt;
-        final boolean outgoing;
-
-        CallEvent(String id, String chatId, String displayName, String mode,
-                  String state, String roomName, String startedAt, boolean outgoing) {
-            this.id = id;
-            this.chatId = chatId;
-            this.displayName = displayName;
-            this.mode = mode;
-            this.state = state;
-            this.roomName = roomName;
-            this.startedAt = startedAt;
-            this.outgoing = outgoing;
-        }
-    }
-
     static final class Message {
         final long id;
         final String senderId;
@@ -531,58 +508,6 @@ final class SupabaseClient {
                             item.optLong("member_count"), item.optString("my_role")));
                 }
                 callback.onSuccess(communities);
-            } catch (Exception exception) {
-                callback.onError(friendly(exception));
-            }
-        });
-    }
-
-    void startCall(String chatId, String mode, Callback<CallEvent> callback) {
-        executor.execute(() -> {
-            try {
-                JSONObject payload = new JSONObject().put("chat_id", chatId).put("call_mode", mode);
-                Response response = authorizedRequest("POST", "/rest/v1/rpc/start_call", payload);
-                ensureSuccess(response);
-                JSONArray array = new JSONArray(response.body);
-                if (array.length() == 0) throw new IOException("Arama başlatılamadı.");
-                JSONObject item = array.getJSONObject(0);
-                callback.onSuccess(new CallEvent(item.optString("call_id"), chatId, "",
-                        mode, "active", item.optString("room_name"), "", true));
-            } catch (Exception exception) {
-                callback.onError(friendly(exception));
-            }
-        });
-    }
-
-    void listCalls(Callback<List<CallEvent>> callback) {
-        executor.execute(() -> {
-            try {
-                Response response = authorizedRequest("POST", "/rest/v1/rpc/list_my_calls", new JSONObject());
-                ensureSuccess(response);
-                JSONArray array = new JSONArray(response.body);
-                List<CallEvent> calls = new ArrayList<>();
-                for (int i = 0; i < array.length(); i++) {
-                    JSONObject item = array.getJSONObject(i);
-                    calls.add(new CallEvent(item.optString("call_id"),
-                            item.optString("conversation_id"), item.optString("display_name"),
-                            item.optString("call_mode"), item.optString("call_state"),
-                            item.optString("room_name"), item.optString("started_at"),
-                            item.optBoolean("is_outgoing")));
-                }
-                callback.onSuccess(calls);
-            } catch (Exception exception) {
-                callback.onError(friendly(exception));
-            }
-        });
-    }
-
-    void endCall(String callId, Callback<Boolean> callback) {
-        executor.execute(() -> {
-            try {
-                Response response = authorizedRequest("POST", "/rest/v1/rpc/end_call",
-                        new JSONObject().put("selected_call_id", callId));
-                ensureSuccess(response);
-                callback.onSuccess(true);
             } catch (Exception exception) {
                 callback.onError(friendly(exception));
             }
