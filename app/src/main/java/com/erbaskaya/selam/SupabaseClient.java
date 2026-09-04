@@ -74,15 +74,104 @@ final class SupabaseClient {
         final String displayName;
         final String lastMessage;
         final String lastMessageAt;
+        final boolean archived;
+        final boolean pinned;
+        final String mutedUntil;
 
         Chat(String id, String kind, String username, String displayName,
-             String lastMessage, String lastMessageAt) {
+             String lastMessage, String lastMessageAt, boolean archived,
+             boolean pinned, String mutedUntil) {
             this.id = id;
             this.kind = kind;
             this.username = username;
             this.displayName = displayName;
             this.lastMessage = lastMessage;
             this.lastMessageAt = lastMessageAt;
+            this.archived = archived;
+            this.pinned = pinned;
+            this.mutedUntil = mutedUntil;
+        }
+    }
+
+    static final class Settings {
+        final String displayName;
+        final String about;
+        final boolean readReceipts;
+        final boolean showLastSeen;
+        final boolean notifications;
+        final boolean callNotifications;
+        final boolean compactMode;
+
+        Settings(String displayName, String about, boolean readReceipts,
+                 boolean showLastSeen, boolean notifications,
+                 boolean callNotifications, boolean compactMode) {
+            this.displayName = displayName;
+            this.about = about;
+            this.readReceipts = readReceipts;
+            this.showLastSeen = showLastSeen;
+            this.notifications = notifications;
+            this.callNotifications = callNotifications;
+            this.compactMode = compactMode;
+        }
+    }
+
+    static final class StatusUpdate {
+        final long id;
+        final String userId;
+        final String displayName;
+        final String body;
+        final String color;
+        final String createdAt;
+        final boolean mine;
+
+        StatusUpdate(long id, String userId, String displayName, String body,
+                     String color, String createdAt, boolean mine) {
+            this.id = id;
+            this.userId = userId;
+            this.displayName = displayName;
+            this.body = body;
+            this.color = color;
+            this.createdAt = createdAt;
+            this.mine = mine;
+        }
+    }
+
+    static final class Community {
+        final String id;
+        final String name;
+        final String description;
+        final long memberCount;
+        final String role;
+
+        Community(String id, String name, String description, long memberCount, String role) {
+            this.id = id;
+            this.name = name;
+            this.description = description;
+            this.memberCount = memberCount;
+            this.role = role;
+        }
+    }
+
+    static final class CallEvent {
+        final String id;
+        final String chatId;
+        final String displayName;
+        final String mode;
+        final String state;
+        final String roomName;
+        final String startedAt;
+        final boolean outgoing;
+
+        CallEvent(String id, String chatId, String displayName, String mode,
+                  String state, String roomName, String startedAt, boolean outgoing) {
+            this.id = id;
+            this.chatId = chatId;
+            this.displayName = displayName;
+            this.mode = mode;
+            this.state = state;
+            this.roomName = roomName;
+            this.startedAt = startedAt;
+            this.outgoing = outgoing;
         }
     }
 
@@ -258,10 +347,204 @@ final class SupabaseClient {
                             item.optString("conversation_id"), item.optString("conversation_kind"),
                             item.optString("username"),
                             item.optString("display_name"), item.optString("last_message"),
-                            item.optString("last_message_at")
+                            item.optString("last_message_at"), item.optBoolean("archived"),
+                            item.optBoolean("pinned"), item.optString("muted_until")
                     ));
                 }
                 callback.onSuccess(chats);
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void getSettings(Callback<Settings> callback) {
+        executor.execute(() -> {
+            try {
+                Response response = authorizedRequest("POST", "/rest/v1/rpc/get_my_settings", new JSONObject());
+                ensureSuccess(response);
+                JSONArray array = new JSONArray(response.body);
+                if (array.length() == 0) throw new IOException("Ayarlar bulunamadı.");
+                JSONObject item = array.getJSONObject(0);
+                callback.onSuccess(new Settings(
+                        item.optString("display_name"), item.optString("about"),
+                        item.optBoolean("read_receipts", true),
+                        item.optBoolean("show_last_seen", true),
+                        item.optBoolean("notifications_enabled", true),
+                        item.optBoolean("call_notifications_enabled", true),
+                        item.optBoolean("compact_mode", false)
+                ));
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void updateSettings(Settings settings, Callback<Boolean> callback) {
+        executor.execute(() -> {
+            try {
+                JSONObject payload = new JSONObject()
+                        .put("new_display_name", settings.displayName)
+                        .put("new_about", settings.about)
+                        .put("new_read_receipts", settings.readReceipts)
+                        .put("new_show_last_seen", settings.showLastSeen)
+                        .put("new_notifications_enabled", settings.notifications)
+                        .put("new_call_notifications_enabled", settings.callNotifications)
+                        .put("new_compact_mode", settings.compactMode);
+                Response response = authorizedRequest("POST", "/rest/v1/rpc/update_my_settings", payload);
+                ensureSuccess(response);
+                callback.onSuccess(true);
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void createStatus(String body, String color, Callback<Boolean> callback) {
+        executor.execute(() -> {
+            try {
+                JSONObject payload = new JSONObject()
+                        .put("status_body", body.trim()).put("status_color", color);
+                Response response = authorizedRequest("POST", "/rest/v1/rpc/create_status", payload);
+                ensureSuccess(response);
+                callback.onSuccess(true);
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void listStatuses(Callback<List<StatusUpdate>> callback) {
+        executor.execute(() -> {
+            try {
+                Response response = authorizedRequest("POST", "/rest/v1/rpc/list_visible_statuses", new JSONObject());
+                ensureSuccess(response);
+                JSONArray array = new JSONArray(response.body);
+                List<StatusUpdate> statuses = new ArrayList<>();
+                for (int i = 0; i < array.length(); i++) {
+                    JSONObject item = array.getJSONObject(i);
+                    statuses.add(new StatusUpdate(item.optLong("status_id"),
+                            item.optString("user_id"), item.optString("display_name"),
+                            item.optString("status_body"), item.optString("background_color"),
+                            item.optString("created_at"), item.optBoolean("is_mine")));
+                }
+                callback.onSuccess(statuses);
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void deleteStatus(long statusId, Callback<Boolean> callback) {
+        executor.execute(() -> {
+            try {
+                Response response = authorizedRequest("POST", "/rest/v1/rpc/delete_my_status",
+                        new JSONObject().put("status_id", statusId));
+                ensureSuccess(response);
+                callback.onSuccess(true);
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void createCommunity(String name, String description, Callback<Boolean> callback) {
+        executor.execute(() -> {
+            try {
+                JSONObject payload = new JSONObject().put("community_name", name.trim())
+                        .put("community_description", description.trim());
+                Response response = authorizedRequest("POST", "/rest/v1/rpc/create_community", payload);
+                ensureSuccess(response);
+                callback.onSuccess(true);
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void listCommunities(Callback<List<Community>> callback) {
+        executor.execute(() -> {
+            try {
+                Response response = authorizedRequest("POST", "/rest/v1/rpc/list_my_communities", new JSONObject());
+                ensureSuccess(response);
+                JSONArray array = new JSONArray(response.body);
+                List<Community> communities = new ArrayList<>();
+                for (int i = 0; i < array.length(); i++) {
+                    JSONObject item = array.getJSONObject(i);
+                    communities.add(new Community(item.optString("community_id"),
+                            item.optString("community_name"), item.optString("community_description"),
+                            item.optLong("member_count"), item.optString("my_role")));
+                }
+                callback.onSuccess(communities);
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void startCall(String chatId, String mode, Callback<CallEvent> callback) {
+        executor.execute(() -> {
+            try {
+                JSONObject payload = new JSONObject().put("chat_id", chatId).put("call_mode", mode);
+                Response response = authorizedRequest("POST", "/rest/v1/rpc/start_call", payload);
+                ensureSuccess(response);
+                JSONArray array = new JSONArray(response.body);
+                if (array.length() == 0) throw new IOException("Arama başlatılamadı.");
+                JSONObject item = array.getJSONObject(0);
+                callback.onSuccess(new CallEvent(item.optString("call_id"), chatId, "",
+                        mode, "active", item.optString("room_name"), "", true));
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void listCalls(Callback<List<CallEvent>> callback) {
+        executor.execute(() -> {
+            try {
+                Response response = authorizedRequest("POST", "/rest/v1/rpc/list_my_calls", new JSONObject());
+                ensureSuccess(response);
+                JSONArray array = new JSONArray(response.body);
+                List<CallEvent> calls = new ArrayList<>();
+                for (int i = 0; i < array.length(); i++) {
+                    JSONObject item = array.getJSONObject(i);
+                    calls.add(new CallEvent(item.optString("call_id"),
+                            item.optString("conversation_id"), item.optString("display_name"),
+                            item.optString("call_mode"), item.optString("call_state"),
+                            item.optString("room_name"), item.optString("started_at"),
+                            item.optBoolean("is_outgoing")));
+                }
+                callback.onSuccess(calls);
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void endCall(String callId, Callback<Boolean> callback) {
+        executor.execute(() -> {
+            try {
+                Response response = authorizedRequest("POST", "/rest/v1/rpc/end_call",
+                        new JSONObject().put("selected_call_id", callId));
+                ensureSuccess(response);
+                callback.onSuccess(true);
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void setChatState(String chatId, Boolean archived, Boolean pinned,
+                      Integer muteHours, Callback<Boolean> callback) {
+        executor.execute(() -> {
+            try {
+                JSONObject payload = new JSONObject().put("chat_id", chatId);
+                if (archived != null) payload.put("new_archived", archived); else payload.put("new_archived", JSONObject.NULL);
+                if (pinned != null) payload.put("new_pinned", pinned); else payload.put("new_pinned", JSONObject.NULL);
+                if (muteHours != null) payload.put("mute_hours", muteHours); else payload.put("mute_hours", JSONObject.NULL);
+                Response response = authorizedRequest("POST", "/rest/v1/rpc/set_chat_state", payload);
+                ensureSuccess(response);
+                callback.onSuccess(true);
             } catch (Exception exception) {
                 callback.onError(friendly(exception));
             }
