@@ -19,6 +19,8 @@ jobs:
     name: Android APK
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      HAS_SIGNING: ${{ secrets.SELAM_KEYSTORE_BASE64 != '' && secrets.SELAM_KEYSTORE_PASSWORD != '' && secrets.SELAM_KEY_ALIAS != '' && secrets.SELAM_KEY_PASSWORD != '' }}
 
     steps:
       - name: Kaynak kodu al
@@ -41,14 +43,48 @@ jobs:
         with:
           gradle-version: "9.5.0"
 
-      - name: APK oluştur
+      - name: Kalıcı imza anahtarını hazırla
+        if: env.HAS_SIGNING == 'true'
+        env:
+          SELAM_KEYSTORE_BASE64: ${{ secrets.SELAM_KEYSTORE_BASE64 }}
+        run: |
+          printf '%s' "$SELAM_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/selam-release.jks"
+          chmod 600 "$RUNNER_TEMP/selam-release.jks"
+
+      - name: İmzalı yayın APK'sı oluştur
+        if: env.HAS_SIGNING == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SELAM_KEYSTORE_PATH: ${{ runner.temp }}/selam-release.jks
+          SELAM_KEYSTORE_PASSWORD: ${{ secrets.SELAM_KEYSTORE_PASSWORD }}
+          SELAM_KEY_ALIAS: ${{ secrets.SELAM_KEY_ALIAS }}
+          SELAM_KEY_PASSWORD: ${{ secrets.SELAM_KEY_PASSWORD }}
+        run: gradle :app:assembleRelease --no-daemon --stacktrace
+
+      - name: İmzalı APK'yı adlandır
+        if: env.HAS_SIGNING == 'true'
+        run: cp app/build/outputs/apk/release/app-release.apk Selam.apk
+
+      - name: Test APK'sı oluştur
+        if: env.HAS_SIGNING != 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: gradle :app:assembleDebug --no-daemon --stacktrace
 
-      - name: APK dosyasını adlandır
+      - name: Test APK'sını adlandır
+        if: env.HAS_SIGNING != 'true'
         run: cp app/build/outputs/apk/debug/app-debug.apk Selam.apk
+
+      - name: İmzalama durumu
+        run: |
+          if [ -f "$RUNNER_TEMP/selam-release.jks" ]; then
+            echo "### Kalıcı yayın anahtarıyla imzalandı" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Test anahtarıyla imzalandı" >> "$GITHUB_STEP_SUMMARY"
+            echo "Kalıcı güncellenebilir APK için SELAM_KEYSTORE_* Secrets değerlerini ekleyin." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: APK'yı indirilebilir yap
         uses: actions/upload-artifact@v4
