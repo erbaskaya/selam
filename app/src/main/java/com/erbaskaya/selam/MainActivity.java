@@ -561,6 +561,18 @@ public class MainActivity extends Activity {
                 if ("active".equals(call.state)) openMeeting(call.roomName, call.mode);
                 else toast("Bu arama sona ermiş.");
             });
+            list.setOnItemLongClickListener((p, v, position, id) -> {
+                SupabaseClient.CallEvent call = calls.get(position);
+                if (!"active".equals(call.state)) return true;
+                new AlertDialog.Builder(this).setTitle("Aramayı bitir")
+                        .setMessage(call.displayName + " görüşmesi sonlandırılsın mı?")
+                        .setNegativeButton("Vazgeç", null)
+                        .setPositiveButton("Bitir", (d, w) -> {
+                            setBusy(true);
+                            api.endCall(call.id, uiCallback(done -> { setBusy(false); showCalls(); }));
+                        }).show();
+                return true;
+            });
         }));
     }
 
