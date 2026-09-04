@@ -2,12 +2,14 @@ package com.erbaskaya.selam;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.net.Uri;
 
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -17,6 +19,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -66,14 +69,16 @@ final class SupabaseClient {
 
     static final class Chat {
         final String id;
+        final String kind;
         final String username;
         final String displayName;
         final String lastMessage;
         final String lastMessageAt;
 
-        Chat(String id, String username, String displayName,
+        Chat(String id, String kind, String username, String displayName,
              String lastMessage, String lastMessageAt) {
             this.id = id;
+            this.kind = kind;
             this.username = username;
             this.displayName = displayName;
             this.lastMessage = lastMessage;
@@ -86,13 +91,27 @@ final class SupabaseClient {
         final String senderId;
         final String body;
         final String createdAt;
+        final String type;
+        final String filePath;
+        final String fileName;
+        final String fileMimeType;
+        final long fileSize;
 
-        Message(long id, String senderId, String body, String createdAt) {
+        Message(long id, String senderId, String body, String createdAt,
+                String type, String filePath, String fileName,
+                String fileMimeType, long fileSize) {
             this.id = id;
             this.senderId = senderId;
             this.body = body;
             this.createdAt = createdAt;
+            this.type = type;
+            this.filePath = filePath;
+            this.fileName = fileName;
+            this.fileMimeType = fileMimeType;
+            this.fileSize = fileSize;
         }
+
+        boolean isFile() { return "file".equals(type); }
     }
 
     private static final String PREFS = "selam_session";
@@ -236,7 +255,8 @@ final class SupabaseClient {
                 for (int i = 0; i < array.length(); i++) {
                     JSONObject item = array.getJSONObject(i);
                     chats.add(new Chat(
-                            item.optString("conversation_id"), item.optString("username"),
+                            item.optString("conversation_id"), item.optString("conversation_kind"),
+                            item.optString("username"),
                             item.optString("display_name"), item.optString("last_message"),
                             item.optString("last_message_at")
                     ));
@@ -274,12 +294,41 @@ final class SupabaseClient {
                 JSONObject payload = new JSONObject().put("other_user_id", otherUserId);
                 Response response = authorizedRequest("POST", "/rest/v1/rpc/start_direct_chat", payload);
                 ensureSuccess(response);
-                String result = response.body.trim();
-                if (result.startsWith("\"") && result.endsWith("\"")) {
-                    result = new JSONArray("[" + result + "]").getString(0);
-                }
+                String result = parseTextResult(response.body);
                 if (result.isEmpty() || "null".equals(result)) throw new IOException("Sohbet oluşturulamadı.");
                 callback.onSuccess(result);
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void createGroup(String groupName, List<String> memberIds, Callback<String> callback) {
+        executor.execute(() -> {
+            try {
+                JSONArray members = new JSONArray();
+                for (String id : memberIds) members.put(id);
+                JSONObject payload = new JSONObject()
+                        .put("group_name", groupName.trim())
+                        .put("member_user_ids", members);
+                Response response = authorizedRequest("POST", "/rest/v1/rpc/create_group", payload);
+                ensureSuccess(response);
+                String result = parseTextResult(response.body);
+                if (result.isEmpty() || "null".equals(result)) throw new IOException("Grup oluşturulamadı.");
+                callback.onSuccess(result);
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void deleteChat(String conversationId, Callback<Boolean> callback) {
+        executor.execute(() -> {
+            try {
+                JSONObject payload = new JSONObject().put("chat_id", conversationId);
+                Response response = authorizedRequest("POST", "/rest/v1/rpc/delete_chat", payload);
+                ensureSuccess(response);
+                callback.onSuccess(true);
             } catch (Exception exception) {
                 callback.onError(friendly(exception));
             }
@@ -298,7 +347,9 @@ final class SupabaseClient {
                     JSONObject item = array.getJSONObject(i);
                     messages.add(new Message(item.optLong("message_id"),
                             item.optString("sender_id"), item.optString("message_body"),
-                            item.optString("created_at")));
+                            item.optString("created_at"), item.optString("message_type", "text"),
+                            item.optString("file_path"), item.optString("file_name"),
+                            item.optString("file_mime_type"), item.optLong("file_size_bytes")));
                 }
                 callback.onSuccess(messages);
             } catch (Exception exception) {
@@ -316,6 +367,61 @@ final class SupabaseClient {
                 Response response = authorizedRequest("POST", "/rest/v1/rpc/send_chat_message", payload);
                 ensureSuccess(response);
                 callback.onSuccess(true);
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void sendFile(String conversationId, InputStream input, String fileName,
+                  String mimeType, long declaredSize, Callback<Boolean> callback) {
+        executor.execute(() -> {
+            try {
+                if (declaredSize > 10L * 1024L * 1024L) {
+                    throw new IOException("Dosya en fazla 10 MB olabilir.");
+                }
+                byte[] bytes;
+                try (InputStream source = input) {
+                    bytes = readBytesLimited(source, 10 * 1024 * 1024);
+                }
+                if (bytes.length == 0) throw new IOException("Dosya boş.");
+
+                String safeName = safeFileName(fileName);
+                String filePath = conversationId + "/" + userId() + "/"
+                        + UUID.randomUUID() + "_" + safeName;
+                String encodedPath = encodePath(filePath);
+                Response uploaded = authorizedBinaryRequest(
+                        "POST", "/storage/v1/object/chat-files/" + encodedPath,
+                        mimeType == null || mimeType.isEmpty() ? "application/octet-stream" : mimeType,
+                        bytes);
+                ensureSuccess(uploaded);
+
+                JSONObject payload = new JSONObject()
+                        .put("chat_id", conversationId)
+                        .put("uploaded_file_path", filePath)
+                        .put("uploaded_file_name", safeName)
+                        .put("uploaded_mime_type", mimeType == null ? "" : mimeType)
+                        .put("uploaded_size_bytes", bytes.length);
+                Response message = authorizedRequest("POST", "/rest/v1/rpc/send_chat_file", payload);
+                ensureSuccess(message);
+                callback.onSuccess(true);
+            } catch (Exception exception) {
+                try { input.close(); } catch (Exception ignored) { }
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void createSignedFileUrl(String filePath, Callback<String> callback) {
+        executor.execute(() -> {
+            try {
+                Response response = authorizedRequest(
+                        "POST", "/storage/v1/object/sign/chat-files/" + encodePath(filePath),
+                        new JSONObject().put("expiresIn", 300));
+                ensureSuccess(response);
+                String signed = new JSONObject(response.body).optString("signedURL");
+                if (signed.isEmpty()) throw new IOException("Dosya bağlantısı oluşturulamadı.");
+                callback.onSuccess(signed.startsWith("http") ? signed : trimSlash(baseUrl) + signed);
             } catch (Exception exception) {
                 callback.onError(friendly(exception));
             }
@@ -388,6 +494,42 @@ final class SupabaseClient {
         return request(method, path, accessToken(), payload);
     }
 
+    private Response authorizedBinaryRequest(String method, String path, String mimeType, byte[] bytes)
+            throws IOException, JSONException {
+        Response response = binaryRequest(method, path, accessToken(), mimeType, bytes);
+        if (response.code != 401 || refreshToken().isEmpty()) return response;
+        JSONObject refreshPayload = new JSONObject().put("refresh_token", refreshToken());
+        Response refreshed = request("POST", "/auth/v1/token?grant_type=refresh_token", null, refreshPayload);
+        if (!refreshed.ok()) {
+            clearSession();
+            return response;
+        }
+        saveSession(new JSONObject(refreshed.body));
+        return binaryRequest(method, path, accessToken(), mimeType, bytes);
+    }
+
+    private Response binaryRequest(String method, String path, String token,
+                                   String mimeType, byte[] bytes) throws IOException {
+        HttpURLConnection connection = (HttpURLConnection) new URL(trimSlash(baseUrl) + path).openConnection();
+        connection.setRequestMethod(method);
+        connection.setConnectTimeout(20_000);
+        connection.setReadTimeout(30_000);
+        connection.setRequestProperty("apikey", publishableKey);
+        connection.setRequestProperty("Authorization", "Bearer " + token);
+        connection.setRequestProperty("Content-Type", mimeType);
+        connection.setRequestProperty("x-upsert", "false");
+        connection.setDoOutput(true);
+        try (OutputStream output = connection.getOutputStream()) {
+            output.write(bytes);
+        }
+        int code = connection.getResponseCode();
+        InputStream stream = code >= 200 && code < 400
+                ? connection.getInputStream() : connection.getErrorStream();
+        String body = read(stream);
+        connection.disconnect();
+        return new Response(code, body);
+    }
+
     private static String read(InputStream input) throws IOException {
         if (input == null) return "";
         StringBuilder result = new StringBuilder();
@@ -400,6 +542,44 @@ final class SupabaseClient {
 
     private static String trimSlash(String value) {
         return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
+    }
+
+    private static String parseTextResult(String body) throws JSONException {
+        String result = body == null ? "" : body.trim();
+        if (result.startsWith("\"") && result.endsWith("\"")) {
+            result = new JSONArray("[" + result + "]").getString(0);
+        }
+        return result;
+    }
+
+    private static String encodePath(String path) {
+        String[] parts = path.split("/");
+        StringBuilder encoded = new StringBuilder();
+        for (String part : parts) {
+            if (encoded.length() > 0) encoded.append('/');
+            encoded.append(Uri.encode(part));
+        }
+        return encoded.toString();
+    }
+
+    private static String safeFileName(String value) {
+        String clean = value == null ? "dosya" : value.trim();
+        clean = clean.replaceAll("[\\r\\n\\t/\\\\]", "_");
+        if (clean.isEmpty()) clean = "dosya";
+        return clean.length() > 120 ? clean.substring(clean.length() - 120) : clean;
+    }
+
+    private static byte[] readBytesLimited(InputStream input, int maxBytes) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[16 * 1024];
+        int total = 0;
+        int count;
+        while ((count = input.read(buffer)) != -1) {
+            total += count;
+            if (total > maxBytes) throw new IOException("Dosya en fazla 10 MB olabilir.");
+            output.write(buffer, 0, count);
+        }
+        return output.toByteArray();
     }
 
     private static void ensureSuccess(Response response) throws IOException {

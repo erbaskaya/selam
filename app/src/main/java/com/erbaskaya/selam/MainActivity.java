@@ -2,6 +2,7 @@ package com.erbaskaya.selam;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -14,13 +15,16 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.ContactsContract;
+import android.provider.OpenableColumns;
 import android.text.InputType;
+import android.net.Uri;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.BaseAdapter;
 import android.widget.Button;
+import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
@@ -53,6 +57,8 @@ public class MainActivity extends Activity {
     private static final int MUTED = Color.rgb(103, 117, 137);
     private static final int BORDER = Color.rgb(218, 226, 237);
     private static final int REQUEST_CONTACTS = 410;
+    private static final int REQUEST_GROUP_CONTACTS = 411;
+    private static final int REQUEST_FILE = 412;
     private static final long POLL_INTERVAL = 2_000L;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -235,6 +241,9 @@ public class MainActivity extends Activity {
         Button contacts = headerButton("Kişiler");
         contacts.setOnClickListener(v -> showContacts());
         header.addView(contacts, new LinearLayout.LayoutParams(dp(78), dp(44)));
+        Button group = headerButton("Grup");
+        group.setOnClickListener(v -> showCreateGroup());
+        header.addView(group, new LinearLayout.LayoutParams(dp(58), dp(44)));
         Button qr = headerButton("QR");
         qr.setOnClickListener(v -> showMyQr());
         header.addView(qr, new LinearLayout.LayoutParams(dp(50), dp(44)));
@@ -401,6 +410,92 @@ public class MainActivity extends Activity {
         query.requestFocus();
     }
 
+    private void showCreateGroup() {
+        stopPolling();
+        screen = "group";
+        LinearLayout page = vertical();
+        page.addView(topBar("Yeni grup", this::showHome));
+
+        EditText groupName = input("Grup adı", InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        page.addView(groupName, margin(-1, dp(54), 16, 16, 16, 8));
+        TextView help = label("Rehberinizde Selam kullanan kişilerden seçim yapın.", 14, MUTED, false);
+        help.setPadding(dp(18), dp(4), dp(18), dp(10));
+        page.addView(help);
+
+        ListView people = plainList();
+        people.setChoiceMode(ListView.CHOICE_MODE_MULTIPLE);
+        page.addView(people, new LinearLayout.LayoutParams(-1, 0, 1));
+        Button create = primaryButton("Grubu oluştur");
+        create.setEnabled(false);
+        page.addView(create, margin(-1, dp(56), 16, 10, 16, 16));
+        setPage(page);
+
+        if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+            help.setText("Grup üyelerini bulmak için rehber erişimine izin verin.");
+            create.setText("Rehbere izin ver");
+            create.setEnabled(true);
+            create.setOnClickListener(v -> requestPermissions(
+                    new String[]{Manifest.permission.READ_CONTACTS}, REQUEST_GROUP_CONTACTS));
+            return;
+        }
+        loadGroupContacts(groupName, people, help, create);
+    }
+
+    private void loadGroupContacts(EditText groupName, ListView list,
+                                   TextView help, Button create) {
+        setBusy(true);
+        new Thread(() -> {
+            Map<String, String> contacts = readPhoneBook();
+            runOnUiThread(() -> {
+                localContactNames = contacts;
+                if (contacts.isEmpty()) {
+                    setBusy(false);
+                    help.setText("Rehberinizde telefon numarası bulunamadı.");
+                    return;
+                }
+                api.matchContacts(new ArrayList<>(contacts.keySet()), uiCallback(matches -> {
+                    setBusy(false);
+                    if (matches.isEmpty()) {
+                        help.setText("Rehberinizde grup kurulabilecek başka Selam kullanıcısı yok.");
+                        return;
+                    }
+                    List<String> names = new ArrayList<>();
+                    for (SupabaseClient.ContactMatch person : matches) {
+                        String localName = localContactNames.get(person.matchedPhone);
+                        names.add(localName == null
+                                ? preferredName(person.displayName, person.username) : localName);
+                    }
+                    list.setAdapter(new ArrayAdapter<>(this,
+                            android.R.layout.simple_list_item_multiple_choice, names));
+                    create.setEnabled(true);
+                    help.setText("Bir veya daha fazla kişi seçin.");
+                    create.setOnClickListener(v -> {
+                        String title = groupName.getText().toString().trim();
+                        if (title.length() < 2) {
+                            toast("Lütfen grup adını yazın.");
+                            return;
+                        }
+                        List<String> selectedIds = new ArrayList<>();
+                        for (int i = 0; i < matches.size(); i++) {
+                            if (list.isItemChecked(i)) selectedIds.add(matches.get(i).id);
+                        }
+                        if (selectedIds.isEmpty()) {
+                            toast("Gruba en az bir kişi seçin.");
+                            return;
+                        }
+                        setBusy(true);
+                        api.createGroup(title, selectedIds, uiCallback(chatId -> {
+                            setBusy(false);
+                            toast("Grup oluşturuldu.");
+                            openChat(chatId, title);
+                        }));
+                    });
+                }));
+            });
+        }).start();
+    }
+
     private void startChat(SupabaseClient.Person person, String shownName) {
         setBusy(true);
         api.startDirectChat(person.id, uiCallback(chatId -> {
@@ -457,6 +552,12 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == REQUEST_FILE) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                sendPickedFile(data.getData());
+            }
+            return;
+        }
         IntentResult result = IntentIntegrator.parseActivityResult(requestCode, resultCode, data);
         if (result != null) {
             if (result.getContents() == null) {
@@ -487,6 +588,12 @@ public class MainActivity extends Activity {
             } else {
                 toast("Rehber izni olmadan kullanıcı adı veya QR koduyla arkadaş ekleyebilirsiniz.");
             }
+        } else if (requestCode == REQUEST_GROUP_CONTACTS) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                showCreateGroup();
+            } else {
+                toast("Grup oluşturmak için rehber erişimi gereklidir.");
+            }
         }
     }
 
@@ -497,6 +604,10 @@ public class MainActivity extends Activity {
         activeMessages = new ArrayList<>();
         LinearLayout page = vertical();
         LinearLayout header = topBar(chatName, this::showHome);
+        Button delete = headerButton("Sil");
+        delete.setTextColor(Color.rgb(255, 142, 142));
+        delete.setOnClickListener(v -> confirmDeleteChat(chatId, chatName));
+        header.addView(delete, new LinearLayout.LayoutParams(dp(52), dp(48)));
         page.addView(header);
         activeMessageList = plainList();
         activeMessageList.setTranscriptMode(ListView.TRANSCRIPT_MODE_ALWAYS_SCROLL);
@@ -506,6 +617,14 @@ public class MainActivity extends Activity {
         composer.setGravity(Gravity.CENTER_VERTICAL);
         composer.setPadding(dp(12), dp(10), dp(12), dp(12));
         composer.setBackgroundColor(Color.WHITE);
+        Button attach = textButton("＋");
+        attach.setTextSize(26);
+        attach.setContentDescription("Dosya gönder");
+        attach.setBackground(rounded(Color.rgb(232, 241, 255), Color.rgb(202, 220, 248), 14));
+        attach.setOnClickListener(v -> pickFile());
+        LinearLayout.LayoutParams attachParams = new LinearLayout.LayoutParams(dp(50), dp(52));
+        attachParams.setMargins(0, 0, dp(8), 0);
+        composer.addView(attach, attachParams);
         EditText message = input("Mesaj", InputType.TYPE_CLASS_TEXT
                 | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         message.setMaxLines(4);
@@ -527,6 +646,74 @@ public class MainActivity extends Activity {
         });
         setPage(page);
         refreshMessages();
+    }
+
+    private void confirmDeleteChat(String chatId, String chatName) {
+        new AlertDialog.Builder(this)
+                .setTitle("Sohbet silinsin mi?")
+                .setMessage(chatName + " sohbetinin mevcut geçmişi yalnızca sizden temizlenecek. Yeni mesaj gelirse sohbet tekrar görünür.")
+                .setNegativeButton("Vazgeç", null)
+                .setPositiveButton("Sil", (dialog, which) -> {
+                    stopPolling();
+                    setBusy(true);
+                    api.deleteChat(chatId, uiCallback(done -> {
+                        setBusy(false);
+                        toast("Sohbet temizlendi.");
+                        showHome();
+                    }));
+                })
+                .show();
+    }
+
+    private void pickFile() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        startActivityForResult(intent, REQUEST_FILE);
+    }
+
+    private void sendPickedFile(Uri uri) {
+        String name = "dosya";
+        long size = -1L;
+        try (Cursor cursor = getContentResolver().query(uri,
+                new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE},
+                null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                int sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE);
+                if (nameIndex >= 0 && !cursor.isNull(nameIndex)) name = cursor.getString(nameIndex);
+                if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) size = cursor.getLong(sizeIndex);
+            }
+            if (size > 10L * 1024L * 1024L) {
+                toast("Dosya en fazla 10 MB olabilir.");
+                return;
+            }
+            String mimeType = getContentResolver().getType(uri);
+            java.io.InputStream input = getContentResolver().openInputStream(uri);
+            if (input == null) throw new Exception("Dosya açılamadı.");
+            setBusy(true);
+            api.sendFile(activeChatId, input, name, mimeType, size, uiCallback(done -> {
+                setBusy(false);
+                toast("Dosya gönderildi.");
+                refreshMessages();
+            }));
+        } catch (Exception exception) {
+            setBusy(false);
+            toast(exception.getMessage() == null ? "Dosya açılamadı." : exception.getMessage());
+        }
+    }
+
+    private void openFile(SupabaseClient.Message message) {
+        setBusy(true);
+        api.createSignedFileUrl(message.filePath, uiCallback(url -> {
+            setBusy(false);
+            try {
+                Intent view = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                startActivity(Intent.createChooser(view, "Dosyayı aç"));
+            } catch (Exception exception) {
+                toast("Dosyayı açabilecek bir uygulama bulunamadı.");
+            }
+        }));
     }
 
     private void refreshMessages() {
@@ -770,7 +957,7 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if ("chat".equals(screen) || "contacts".equals(screen)
+        if ("chat".equals(screen) || "contacts".equals(screen) || "group".equals(screen)
                 || "search".equals(screen) || "profile".equals(screen)) showHome();
         else super.onBackPressed();
     }
@@ -790,7 +977,8 @@ public class MainActivity extends Activity {
         @Override public long getItemId(int position) { return position; }
         @Override public View getView(int position, View convertView, ViewGroup parent) {
             SupabaseClient.Chat chat = items.get(position);
-            String name = preferredName(chat.displayName, chat.username);
+            String name = "group".equals(chat.kind) ? chat.displayName
+                    : preferredName(chat.displayName, chat.username);
             LinearLayout row = personRow(name, chat.lastMessage == null || chat.lastMessage.isEmpty()
                     ? "Yeni sohbet" : chat.lastMessage, 52);
             row.addView(label(time(chat.lastMessageAt), 12, MUTED, false));
@@ -873,13 +1061,26 @@ public class MainActivity extends Activity {
             bubble.setPadding(dp(13), dp(9), dp(11), dp(7));
             bubble.setBackground(rounded(mine ? BLUE : Color.WHITE,
                     mine ? BLUE : BORDER, 16));
-            bubble.addView(label(message.body, 16, mine ? Color.WHITE : TEXT, false));
+            String content = message.isFile()
+                    ? "📎 " + message.fileName + "\n" + fileSize(message.fileSize)
+                    : message.body;
+            bubble.addView(label(content, 16, mine ? Color.WHITE : TEXT, message.isFile()));
             TextView when = label(time(message.createdAt), 11,
                     mine ? Color.rgb(219, 232, 255) : MUTED, false);
             when.setGravity(Gravity.END);
             bubble.addView(when);
+            if (message.isFile()) {
+                bubble.setClickable(true);
+                bubble.setOnClickListener(v -> openFile(message));
+            }
             outer.addView(bubble, new LinearLayout.LayoutParams(-2, -2));
             return outer;
         }
+    }
+
+    private static String fileSize(long bytes) {
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) return String.format(Locale.getDefault(), "%.1f KB", bytes / 1024.0);
+        return String.format(Locale.getDefault(), "%.1f MB", bytes / (1024.0 * 1024.0));
     }
 }
