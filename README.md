@@ -1,11 +1,13 @@
-# Selam Android
+# Selam Android ve iPhone
 
-Selam, bağımsız çalışan mavi temalı Android mesajlaşma uygulamasıdır. WebView kullanmaz ve ChatGPT oturumu istemez.
+Selam, bağımsız çalışan mavi temalı Android ve iPhone mesajlaşma uygulamasıdır. WebView kullanmaz ve ChatGPT oturumu istemez.
 
-## Sürüm 1.4 özellikleri
+## Sürüm 1.4.1 özellikleri
 
 - E-posta, şifre ve ücretli SMS olmadan cihaz hesabı
-- Ad ve telefon numarasıyla tek adımlı kurulum
+- Ad, telefon numarası ve 6 haneli kurtarma PIN'iyle kurulum
+- Uygulama silinip yeniden kurulduğunda numara ve PIN ile sohbetleri geri yükleme
+- PIN'leri açık metin saklamayan bcrypt özeti ve deneme sınırı
 - Android rehberini tarayıp Selam kullanan kişileri gösterme
 - Telefon numaralarını açık biçimde saklamayan anahtarlı özet eşleştirmesi
 - QR kod ve güvenlik koduyla arkadaş ekleme
@@ -26,14 +28,16 @@ Selam, bağımsız çalışan mavi temalı Android mesajlaşma uygulamasıdır. 
 - Topluluk oluşturma ve üyelik görünümü
 - Sohbetten sesli/görüntülü görüşme odası başlatma ve arama geçmişi
 - Ana ekrandan kamera ile fotoğraf çekip sohbet seçerek gönderme
+- Sohbet listesinin sağ altında her zaman görünen mavi “＋” yeni sohbet düğmesi
+- Aynı Supabase hesabını kullanan SwiftUI iPhone istemcisi
 
 ## Gizlilik ve güvenlik
 
 Rehberdeki kişiler veritabanında saklanmaz. Telefon numaraları yalnızca eşleştirme isteği sırasında sunucuya gönderilir; kullanıcı profillerinde açık telefon numarası yerine sunucu sırrıyla oluşturulan özet ve son dört hane tutulur.
 
-SMS doğrulaması kullanılmadığı için kullanıcıların yazdığı telefon numarası operatör tarafından doğrulanmış sayılmaz. QR/güvenlik kodu, konuşulan kişinin kimliğini karşılıklı kontrol etmek için kullanılır.
+SMS doğrulaması kullanılmadığı için kullanıcıların yazdığı telefon numarası operatör tarafından doğrulanmış sayılmaz. QR/güvenlik kodu, konuşulan kişinin kimliğini karşılıklı kontrol etmek için kullanılır. Kurtarma PIN'i bcrypt ile özetlenir; düz PIN veritabanına yazılmaz. Yanlış kurtarma denemeleri cihaz ve hedef numara bazında sınırlandırılır.
 
-Cihaz hesabının oturumu uygulama verilerinde tutulur. Uygulama verileri silinirse veya telefon değiştirilirse mevcut hesaba erişim kaybolabilir; hesap taşıma/kurtarma sonraki sürüm kapsamındadır.
+Cihaz hesabının oturumu uygulama verilerinde tutulur. Uygulama verileri silinir veya telefon değiştirilirse giriş ekranındaki **Hesabımı geri yükle** seçeneğiyle telefon numarası ve 6 haneli PIN kullanılır. Sürüm 1.4.0'dan yükselten mevcut kullanıcıların uygulamayı silmeden önce Ayarlar'dan kurtarma PIN'i belirlemesi gerekir.
 
 ## Supabase bağlantısı
 
@@ -43,10 +47,14 @@ Bağlantıyı başka bir Supabase projesine taşımak gerekirse GitHub reposunda
 
 APK oluşturmak için Actions içindeki **Selam APK Oluştur** iş akışını çalıştırın.
 
+## iPhone derlemesi
+
+iPhone kaynakları `ios/Selam` klasöründedir. GitHub Actions içindeki **Selam iPhone Oluştur** iş akışı macOS üzerinde projeyi oluşturur, derler ve iPhone Simulator paketini indirilebilir yapar. Gerçek iPhone'a kurulabilen imzalı IPA için Apple Developer hesabına ait dağıtım sertifikası ve provisioning profile gerekir; bunlar repoya yüklenmemelidir.
+
 Servis rolü anahtarını APK'ya veya GitHub secret'ına eklemeyin. Yalnızca istemciler için hazırlanmış publishable anahtar kullanılmalıdır.
 
 ## Sonraki sürümler
 
-Hesap taşıma/kurtarma, arka planda anlık bildirim, tam çözünürlüklü kamera,
-sesli mesaj, mesaj yanıtlama/düzenleme/tepki ve yerel WebRTC aramaları sonraki
+Arka planda anlık bildirim, tam çözünürlüklü kamera, sesli mesaj,
+mesaj yanıtlama/düzenleme/tepki ve yerel WebRTC aramaları sonraki
 geliştirme paketidir.

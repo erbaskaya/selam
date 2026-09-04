@@ -46,6 +46,18 @@ final class SupabaseClient {
         }
     }
 
+    static final class RecoveryResult {
+        final boolean success;
+        final String message;
+        final Profile profile;
+
+        RecoveryResult(boolean success, String message, Profile profile) {
+            this.success = success;
+            this.message = message;
+            this.profile = profile;
+        }
+    }
+
     static class Person {
         final String id;
         final String username;
@@ -273,13 +285,16 @@ final class SupabaseClient {
         });
     }
 
-    void setupProfile(String displayName, String phoneE164, Callback<Profile> callback) {
+    void setupProfile(String displayName, String phoneE164, String recoveryPin,
+                      Callback<Profile> callback) {
         executor.execute(() -> {
             try {
                 JSONObject payload = new JSONObject()
                         .put("new_display_name", displayName.trim())
-                        .put("phone_e164", phoneE164);
-                Response response = authorizedRequest("POST", "/rest/v1/rpc/setup_profile", payload);
+                        .put("phone_e164", phoneE164)
+                        .put("recovery_pin", recoveryPin);
+                Response response = authorizedRequest(
+                        "POST", "/rest/v1/rpc/setup_profile_with_pin", payload);
                 ensureSuccess(response);
                 JSONArray array = new JSONArray(response.body);
                 if (array.length() == 0) throw new IOException("Profil oluşturulamadı.");
@@ -287,6 +302,46 @@ final class SupabaseClient {
                 callback.onSuccess(new Profile(
                         item.optString("username"), item.optString("display_name"),
                         item.optString("phone_last4"), item.optString("safety_code"), true));
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void recoverProfile(String phoneE164, String recoveryPin,
+                        Callback<RecoveryResult> callback) {
+        executor.execute(() -> {
+            try {
+                JSONObject payload = new JSONObject()
+                        .put("phone_e164", phoneE164)
+                        .put("recovery_pin", recoveryPin);
+                Response response = authorizedRequest(
+                        "POST", "/rest/v1/rpc/recover_profile", payload);
+                ensureSuccess(response);
+                JSONArray array = new JSONArray(response.body);
+                if (array.length() == 0) throw new IOException("Kurtarma sonucu alınamadı.");
+                JSONObject item = array.getJSONObject(0);
+                boolean success = item.optBoolean("success");
+                Profile profile = success ? new Profile(
+                        item.optString("username"), item.optString("display_name"),
+                        item.optString("phone_last4"), item.optString("safety_code"), true
+                ) : null;
+                callback.onSuccess(new RecoveryResult(
+                        success, item.optString("result_message"), profile));
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void setRecoveryPin(String recoveryPin, Callback<Boolean> callback) {
+        executor.execute(() -> {
+            try {
+                Response response = authorizedRequest(
+                        "POST", "/rest/v1/rpc/set_recovery_pin",
+                        new JSONObject().put("new_pin", recoveryPin));
+                ensureSuccess(response);
+                callback.onSuccess(true);
             } catch (Exception exception) {
                 callback.onError(friendly(exception));
             }

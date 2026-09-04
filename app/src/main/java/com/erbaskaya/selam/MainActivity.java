@@ -194,16 +194,20 @@ public class MainActivity extends Activity {
         page.addView(logo, new LinearLayout.LayoutParams(dp(88), dp(88)));
         page.addView(labelCentered("Selam'a hoş geldin", 28, TEXT, true),
                 margin(-1, -2, 0, 14, 0, 6));
-        page.addView(labelCentered("E-posta, şifre ve ücretli SMS olmadan cihaz hesabını oluştur.", 16, MUTED, false),
+        page.addView(labelCentered("E-posta ve ücretli SMS olmadan hesabını oluştur. 6 haneli PIN'in yeniden kurulumda hesabını geri getirir.", 16, MUTED, false),
                 margin(-1, -2, 0, 0, 0, 26));
 
         EditText displayName = input("Adınız ve soyadınız", InputType.TYPE_CLASS_TEXT);
         page.addView(displayName, margin(-1, dp(56), 0, 0, 0, 12));
         EditText phone = input("Telefon numaranız (05xx xxx xx xx)",
                 InputType.TYPE_CLASS_PHONE);
-        page.addView(phone, margin(-1, dp(56), 0, 0, 0, 14));
+        page.addView(phone, margin(-1, dp(56), 0, 0, 0, 12));
+        EditText pin = input("6 haneli kurtarma PIN'i",
+                InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        pin.setMaxLines(1);
+        page.addView(pin, margin(-1, dp(56), 0, 0, 0, 14));
 
-        TextView note = label("Bu numaraya SMS gönderilmez. Numara yalnızca rehberinizdeki Selam kullanıcılarını bulmak için kullanılır.", 14, MUTED, false);
+        TextView note = label("Bu numaraya SMS gönderilmez. PIN'ini güvenli bir yere kaydet; uygulamayı silip yeniden kurarsan numaran ve PIN'inle sohbetlerini geri alabilirsin.", 14, MUTED, false);
         note.setPadding(dp(14), dp(12), dp(14), dp(12));
         note.setBackground(rounded(Color.rgb(232, 241, 255), Color.rgb(202, 220, 248), 12));
         page.addView(note, margin(-1, -2, 0, 0, 0, 18));
@@ -213,6 +217,7 @@ public class MainActivity extends Activity {
         continueButton.setOnClickListener(v -> {
             String nameValue = displayName.getText().toString().trim();
             String normalized = normalizePhone(phone.getText().toString());
+            String pinValue = pin.getText().toString().trim();
             if (nameValue.length() < 2) {
                 toast("Lütfen adınızı yazın.");
                 return;
@@ -221,13 +226,45 @@ public class MainActivity extends Activity {
                 toast("Geçerli bir telefon numarası yazın.");
                 return;
             }
+            if (!isValidPin(pinValue)) {
+                toast("PIN tam 6 rakam olmalı ve kolay bir sayı olmamalı.");
+                return;
+            }
             setBusy(true);
             hideKeyboard();
-            api.setupProfile(nameValue, normalized, uiCallback(profile -> {
+            api.setupProfile(nameValue, normalized, pinValue, uiCallback(profile -> {
                 myProfile = profile;
                 setBusy(false);
                 toast("Cihaz hesabın hazır.");
                 showContacts();
+            }));
+        });
+
+        Button recoverButton = textButton("Hesabımı geri yükle");
+        recoverButton.setBackground(rounded(Color.WHITE, BLUE, 14));
+        page.addView(recoverButton, margin(-1, dp(54), 0, 10, 0, 0));
+        recoverButton.setOnClickListener(v -> {
+            String normalized = normalizePhone(phone.getText().toString());
+            String pinValue = pin.getText().toString().trim();
+            if (normalized == null) {
+                toast("Kayıtlı telefon numaranızı yazın.");
+                return;
+            }
+            if (!pinValue.matches("^[0-9]{6}$")) {
+                toast("6 haneli PIN'inizi yazın.");
+                return;
+            }
+            setBusy(true);
+            hideKeyboard();
+            api.recoverProfile(normalized, pinValue, uiCallback(result -> {
+                setBusy(false);
+                if (!result.success || result.profile == null) {
+                    toast(result.message.isEmpty() ? "Hesap geri yüklenemedi." : result.message);
+                    return;
+                }
+                myProfile = result.profile;
+                toast(result.message);
+                showHome();
             }));
         });
         setPage(scroll);
@@ -247,12 +284,24 @@ public class MainActivity extends Activity {
 
         FrameLayout content = new FrameLayout(this);
         ListView list = plainList();
+        list.setClipToPadding(false);
+        list.setPadding(0, 0, 0, dp(82));
         TextView empty = label("Henüz sohbet yok. Sağ alttaki düğmeden rehberindeki Selam kullanıcılarını bul.", 16, MUTED, false);
         empty.setGravity(Gravity.CENTER);
         empty.setPadding(dp(34), dp(34), dp(34), dp(34));
         content.addView(list, new FrameLayout.LayoutParams(-1, -1));
         content.addView(empty, new FrameLayout.LayoutParams(-1, -1));
         list.setEmptyView(empty);
+        Button newChat = primaryButton("＋");
+        newChat.setTextSize(28);
+        newChat.setContentDescription("Yeni sohbet başlat");
+        newChat.setElevation(dp(8));
+        newChat.setBackground(rounded(BLUE, BLUE, 30));
+        newChat.setOnClickListener(v -> showContacts());
+        FrameLayout.LayoutParams newChatParams = new FrameLayout.LayoutParams(
+                dp(60), dp(60), Gravity.END | Gravity.BOTTOM);
+        newChatParams.setMargins(0, 0, dp(18), dp(18));
+        content.addView(newChat, newChatParams);
         page.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
         addBottomNavigation(page, "chats");
         setPage(page);
@@ -648,6 +697,25 @@ public class MainActivity extends Activity {
             qr.setBackground(rounded(Color.WHITE, BORDER, 14));
             qr.setOnClickListener(v -> showMyQr());
             form.addView(qr, margin(-1, dp(52), 0, 0, 0, 10));
+            EditText recoveryPin = input("Yeni 6 haneli kurtarma PIN'i",
+                    InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+            form.addView(recoveryPin, margin(-1, dp(54), 0, 2, 0, 8));
+            Button changePin = textButton("Kurtarma PIN'ini değiştir");
+            changePin.setBackground(rounded(Color.WHITE, BLUE, 14));
+            changePin.setOnClickListener(v -> {
+                String pinValue = recoveryPin.getText().toString().trim();
+                if (!isValidPin(pinValue)) {
+                    toast("PIN tam 6 rakam olmalı ve kolay bir sayı olmamalı.");
+                    return;
+                }
+                setBusy(true);
+                api.setRecoveryPin(pinValue, uiCallback(done -> {
+                    setBusy(false);
+                    recoveryPin.setText("");
+                    toast("Kurtarma PIN'i değiştirildi.");
+                }));
+            });
+            form.addView(changePin, margin(-1, dp(52), 0, 0, 0, 12));
             Button save = primaryButton("Ayarları kaydet");
             save.setOnClickListener(v -> {
                 SupabaseClient.Settings changed = new SupabaseClient.Settings(
@@ -1225,6 +1293,14 @@ public class MainActivity extends Activity {
         else if (digits.length() == 12 && digits.startsWith("90")) result = "+" + digits;
         else return null;
         return result.matches("^\\+[1-9][0-9]{7,14}$") ? result : null;
+    }
+
+    private static boolean isValidPin(String pin) {
+        return pin != null && pin.matches("^[0-9]{6}$")
+                && !"000000".equals(pin)
+                && !"111111".equals(pin)
+                && !"123456".equals(pin)
+                && !"654321".equals(pin);
     }
 
     private void stopPolling() {

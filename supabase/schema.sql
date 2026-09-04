@@ -766,3 +766,6 @@ grant execute on function public.delete_chat(uuid) to authenticated;
 grant execute on function public.list_my_chats() to authenticated;
 grant execute on function public.list_chat_messages(uuid) to authenticated;
 grant execute on function public.send_chat_file(uuid, text, text, text, bigint) to authenticated;
+
+-- Selam 1.4.1 recovery PIN support is defined in:
+-- supabase/migrations/20260904081500_add_recovery_pin.sql

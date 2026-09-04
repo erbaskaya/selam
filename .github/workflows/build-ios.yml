@@ -1,0 +1,51 @@
+name: Selam iPhone Oluştur
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "ios/**"
+      - ".github/workflows/build-ios.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-ios:
+    name: iPhone Simulator Uygulaması
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Kaynak kodu al
+        uses: actions/checkout@v4
+
+      - name: XcodeGen kur
+        run: brew install xcodegen
+
+      - name: Xcode projesini oluştur
+        run: xcodegen generate --spec ios/Selam/project.yml
+
+      - name: iPhone Simulator için derle
+        run: |
+          xcodebuild \
+            -project ios/Selam/Selam.xcodeproj \
+            -scheme Selam \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -derivedDataPath "$RUNNER_TEMP/SelamDerived" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Uygulamayı paketle
+        run: |
+          cd "$RUNNER_TEMP/SelamDerived/Build/Products/Release-iphonesimulator"
+          ditto -c -k --sequesterRsrc --keepParent Selam.app "$GITHUB_WORKSPACE/Selam-iPhone-Simulator.zip"
+
+      - name: Derlemeyi indirilebilir yap
+        uses: actions/upload-artifact@v4
+        with:
+          name: Selam-iPhone-Simulator
+          path: Selam-iPhone-Simulator.zip
+          if-no-files-found: error
+          retention-days: 30
