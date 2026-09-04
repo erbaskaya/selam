@@ -192,6 +192,84 @@ final class SupabaseClient {
         boolean isFile() { return "file".equals(type); }
     }
 
+    static final class MessageNotification {
+        final long id;
+        final String conversationId;
+        final String senderName;
+        final String preview;
+
+        MessageNotification(long id, String conversationId, String senderName, String preview) {
+            this.id = id;
+            this.conversationId = conversationId;
+            this.senderName = senderName;
+            this.preview = preview;
+        }
+    }
+
+    static final class IncomingCall {
+        final String id;
+        final String conversationId;
+        final String callerName;
+
+        IncomingCall(String id, String conversationId, String callerName) {
+            this.id = id;
+            this.conversationId = conversationId;
+            this.callerName = callerName;
+        }
+    }
+
+    static final class CallState {
+        final String id;
+        final String callerId;
+        final String calleeId;
+        final String state;
+        final String offerSdp;
+        final String answerSdp;
+
+        CallState(String id, String callerId, String calleeId, String state,
+                  String offerSdp, String answerSdp) {
+            this.id = id;
+            this.callerId = callerId;
+            this.calleeId = calleeId;
+            this.state = state;
+            this.offerSdp = offerSdp;
+            this.answerSdp = answerSdp;
+        }
+    }
+
+    static final class CallLog {
+        final String id;
+        final String conversationId;
+        final String otherName;
+        final String state;
+        final String startedAt;
+        final boolean outgoing;
+
+        CallLog(String id, String conversationId, String otherName, String state,
+                String startedAt, boolean outgoing) {
+            this.id = id;
+            this.conversationId = conversationId;
+            this.otherName = otherName;
+            this.state = state;
+            this.startedAt = startedAt;
+            this.outgoing = outgoing;
+        }
+    }
+
+    static final class IceCandidateData {
+        final long id;
+        final String candidate;
+        final String sdpMid;
+        final int sdpMLineIndex;
+
+        IceCandidateData(long id, String candidate, String sdpMid, int sdpMLineIndex) {
+            this.id = id;
+            this.candidate = candidate;
+            this.sdpMid = sdpMid;
+            this.sdpMLineIndex = sdpMLineIndex;
+        }
+    }
+
     private static final String PREFS = "selam_session";
     private static final String ACCESS_TOKEN = "access_token";
     private static final String REFRESH_TOKEN = "refresh_token";
@@ -615,6 +693,185 @@ final class SupabaseClient {
                             item.optString("file_mime_type"), item.optLong("file_size_bytes")));
                 }
                 callback.onSuccess(messages);
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void listMessageNotifications(long afterMessageId,
+                                  Callback<List<MessageNotification>> callback) {
+        executor.execute(() -> {
+            try {
+                JSONObject payload = new JSONObject().put("after_message_id", afterMessageId);
+                Response response = authorizedRequest("POST",
+                        "/rest/v1/rpc/list_message_notifications", payload);
+                ensureSuccess(response);
+                JSONArray array = new JSONArray(response.body);
+                List<MessageNotification> items = new ArrayList<>();
+                for (int i = 0; i < array.length(); i++) {
+                    JSONObject item = array.getJSONObject(i);
+                    items.add(new MessageNotification(
+                            item.optLong("message_id"),
+                            item.optString("conversation_id"),
+                            item.optString("sender_name", "Selam"),
+                            item.optString("message_preview", "Yeni mesaj")
+                    ));
+                }
+                callback.onSuccess(items);
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void startAudioCall(String conversationId, String offerSdp, Callback<String> callback) {
+        executor.execute(() -> {
+            try {
+                JSONObject payload = new JSONObject()
+                        .put("chat_id", conversationId)
+                        .put("session_offer", offerSdp);
+                Response response = authorizedRequest("POST", "/rest/v1/rpc/start_audio_call", payload);
+                ensureSuccess(response);
+                String callId = parseTextResult(response.body);
+                if (callId.isEmpty() || "null".equals(callId)) throw new IOException("Arama başlatılamadı.");
+                callback.onSuccess(callId);
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void listIncomingCalls(Callback<List<IncomingCall>> callback) {
+        executor.execute(() -> {
+            try {
+                Response response = authorizedRequest("POST",
+                        "/rest/v1/rpc/list_incoming_audio_calls", new JSONObject());
+                ensureSuccess(response);
+                JSONArray array = new JSONArray(response.body);
+                List<IncomingCall> calls = new ArrayList<>();
+                for (int i = 0; i < array.length(); i++) {
+                    JSONObject item = array.getJSONObject(i);
+                    calls.add(new IncomingCall(item.optString("call_id"),
+                            item.optString("conversation_id"),
+                            item.optString("caller_name", "Selam kullanıcısı")));
+                }
+                callback.onSuccess(calls);
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void listCallHistory(Callback<List<CallLog>> callback) {
+        executor.execute(() -> {
+            try {
+                Response response = authorizedRequest("POST",
+                        "/rest/v1/rpc/list_audio_call_history", new JSONObject());
+                ensureSuccess(response);
+                JSONArray array = new JSONArray(response.body);
+                List<CallLog> calls = new ArrayList<>();
+                for (int i = 0; i < array.length(); i++) {
+                    JSONObject item = array.getJSONObject(i);
+                    calls.add(new CallLog(item.optString("call_id"),
+                            item.optString("conversation_id"),
+                            item.optString("other_name", "Selam kullanıcısı"),
+                            item.optString("call_state"), item.optString("started_at"),
+                            item.optBoolean("is_outgoing")));
+                }
+                callback.onSuccess(calls);
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void getCallState(String callId, Callback<CallState> callback) {
+        executor.execute(() -> {
+            try {
+                JSONObject payload = new JSONObject().put("selected_call_id", callId);
+                Response response = authorizedRequest("POST",
+                        "/rest/v1/rpc/get_audio_call_state", payload);
+                ensureSuccess(response);
+                JSONArray array = new JSONArray(response.body);
+                if (array.length() == 0) throw new IOException("Arama bulunamadı.");
+                JSONObject item = array.getJSONObject(0);
+                callback.onSuccess(new CallState(item.optString("call_id"),
+                        item.optString("caller_id"), item.optString("callee_id"),
+                        item.optString("call_state"), item.optString("offer_sdp"),
+                        item.optString("answer_sdp")));
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void answerAudioCall(String callId, String answerSdp, Callback<Boolean> callback) {
+        simpleCallAction("answer_audio_call", callId, answerSdp, callback);
+    }
+
+    void declineAudioCall(String callId, Callback<Boolean> callback) {
+        simpleCallAction("decline_audio_call", callId, null, callback);
+    }
+
+    void endAudioCall(String callId, Callback<Boolean> callback) {
+        simpleCallAction("end_audio_call", callId, null, callback);
+    }
+
+    void addIceCandidate(String callId, String candidate, String sdpMid,
+                         int sdpMLineIndex, Callback<Boolean> callback) {
+        executor.execute(() -> {
+            try {
+                JSONObject payload = new JSONObject()
+                        .put("selected_call_id", callId)
+                        .put("ice_candidate", candidate)
+                        .put("candidate_sdp_mid", sdpMid == null ? JSONObject.NULL : sdpMid)
+                        .put("candidate_sdp_mline_index", sdpMLineIndex);
+                Response response = authorizedRequest("POST",
+                        "/rest/v1/rpc/add_audio_ice_candidate", payload);
+                ensureSuccess(response);
+                callback.onSuccess(true);
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    void listIceCandidates(String callId, long afterId,
+                           Callback<List<IceCandidateData>> callback) {
+        executor.execute(() -> {
+            try {
+                JSONObject payload = new JSONObject()
+                        .put("selected_call_id", callId)
+                        .put("after_candidate_id", afterId);
+                Response response = authorizedRequest("POST",
+                        "/rest/v1/rpc/list_audio_ice_candidates", payload);
+                ensureSuccess(response);
+                JSONArray array = new JSONArray(response.body);
+                List<IceCandidateData> candidates = new ArrayList<>();
+                for (int i = 0; i < array.length(); i++) {
+                    JSONObject item = array.getJSONObject(i);
+                    candidates.add(new IceCandidateData(item.optLong("candidate_id"),
+                            item.optString("ice_candidate"),
+                            item.optString("candidate_sdp_mid", null),
+                            item.optInt("candidate_sdp_mline_index")));
+                }
+                callback.onSuccess(candidates);
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
+    private void simpleCallAction(String functionName, String callId, String answerSdp,
+                                  Callback<Boolean> callback) {
+        executor.execute(() -> {
+            try {
+                JSONObject payload = new JSONObject().put("selected_call_id", callId);
+                if (answerSdp != null) payload.put("session_answer", answerSdp);
+                Response response = authorizedRequest("POST", "/rest/v1/rpc/" + functionName, payload);
+                ensureSuccess(response);
+                callback.onSuccess(true);
             } catch (Exception exception) {
                 callback.onError(friendly(exception));
             }

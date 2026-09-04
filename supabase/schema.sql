@@ -769,3 +769,6 @@ grant execute on function public.send_chat_file(uuid, text, text, text, bigint) 
 
 -- Selam 1.4.1 recovery PIN support is defined in:
 -- supabase/migrations/20260904081500_add_recovery_pin.sql
+
+-- Selam 1.5 Android notifications and native WebRTC call signaling is defined in:
+-- supabase/migrations/20260904173500_add_native_calls_and_notifications.sql

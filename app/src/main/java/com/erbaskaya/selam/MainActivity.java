@@ -11,7 +11,9 @@ import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.Drawable;
 import android.os.Bundle;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.ContactsContract;
@@ -32,6 +34,7 @@ import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
+import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ProgressBar;
@@ -68,12 +71,15 @@ public class MainActivity extends Activity {
     private static final int REQUEST_FILE = 412;
     private static final int REQUEST_CAMERA = 413;
     private static final int REQUEST_CAMERA_PERMISSION = 414;
+    private static final int REQUEST_AUDIO_PERMISSION = 415;
+    private static final int REQUEST_NOTIFICATIONS = 416;
     private static final long POLL_INTERVAL = 2_000L;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable pollMessages = this::refreshMessages;
     private SupabaseClient api;
     private UpdateManager updateManager;
+    private SelamAlerts alerts;
     private SupabaseClient.Profile myProfile;
     private FrameLayout root;
     private ProgressBar progress;
@@ -84,6 +90,9 @@ public class MainActivity extends Activity {
     private Map<String, String> localContactNames = new LinkedHashMap<>();
     private String pendingCameraChatId;
     private String pendingCameraChatName;
+    private boolean pendingCameraChatCanCall;
+    private String pendingCallChatId;
+    private String pendingCallName;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -92,6 +101,7 @@ public class MainActivity extends Activity {
         getWindow().setNavigationBarColor(NAVY);
         api = new SupabaseClient(this);
         updateManager = new UpdateManager(this);
+        alerts = new SelamAlerts(this, api);
 
         root = new FrameLayout(this);
         // Android 15+ sistem çubuklarını içerik üstüne bindirir. Kök görünüm
@@ -137,7 +147,11 @@ public class MainActivity extends Activity {
         api.getMyProfile(uiCallback(profile -> {
             myProfile = profile;
             setBusy(false);
-            if (profile.ready) showHome();
+            if (profile.ready) {
+                requestNotificationPermission();
+                alerts.start();
+                showHome();
+            }
             else showOnboarding();
         }, this::showConnectionError));
     }
@@ -349,7 +363,8 @@ public class MainActivity extends Activity {
         list.setAdapter(new ChatAdapter(chats));
         list.setOnItemClickListener((parent, view, position, id) -> {
             SupabaseClient.Chat chat = chats.get(position);
-            openChat(chat.id, preferredName(chat.displayName, chat.username));
+            openChat(chat.id, preferredName(chat.displayName, chat.username),
+                    "direct".equals(chat.kind));
         });
         list.setOnItemLongClickListener((parent, view, position, id) -> {
             showChatActions(view, chats.get(position));
@@ -370,9 +385,7 @@ public class MainActivity extends Activity {
         titles.addView(label("Selam", 23, Color.WHITE, true));
         titles.addView(label(section, 12, Color.rgb(184, 203, 230), false));
         header.addView(titles, new LinearLayout.LayoutParams(0, -2, 1));
-        Button camera = headerButton("▣");
-        camera.setTextSize(22);
-        camera.setContentDescription("Kamera");
+        ImageButton camera = headerIconButton(R.drawable.ic_camera, "Kamera");
         camera.setOnClickListener(v -> chooseCameraChat());
         header.addView(camera, new LinearLayout.LayoutParams(dp(48), dp(48)));
         Button menu = headerButton("⋮");
@@ -386,28 +399,48 @@ public class MainActivity extends Activity {
     private void addBottomNavigation(LinearLayout page, String selected) {
         LinearLayout nav = horizontal();
         nav.setGravity(Gravity.CENTER);
-        nav.setPadding(dp(4), dp(5), dp(4), dp(5));
+        nav.setPadding(dp(3), dp(5), dp(3), dp(4));
         nav.setBackgroundColor(Color.WHITE);
-        addNavButton(nav, "▣\nSohbetler", "chats", selected, this::showHome);
-        addNavButton(nav, "◉\nGüncellemeler", "updates", selected, this::showUpdates);
-        addNavButton(nav, "♟\nTopluluklar", "communities", selected, this::showCommunities);
-        page.addView(nav, new LinearLayout.LayoutParams(-1, dp(68)));
+        addNavButton(nav, "Sohbetler", R.drawable.ic_nav_chats,
+                "chats", selected, this::showHome);
+        addNavButton(nav, "Güncellemeler", R.drawable.ic_nav_updates,
+                "updates", selected, this::showUpdates);
+        addNavButton(nav, "Topluluklar", R.drawable.ic_nav_communities,
+                "communities", selected, this::showCommunities);
+        addNavButton(nav, "Aramalar", R.drawable.ic_phone,
+                "calls", selected, this::showCalls);
+        page.addView(nav, new LinearLayout.LayoutParams(-1, dp(78)));
     }
 
-    private void addNavButton(LinearLayout nav, String title, String id,
-                              String selected, Runnable action) {
-        Button button = textButton(title);
-        button.setTextSize(11);
-        button.setGravity(Gravity.CENTER);
-        button.setTextColor(id.equals(selected) ? BLUE : TEXT);
-        button.setTypeface(Typeface.DEFAULT, id.equals(selected) ? Typeface.BOLD : Typeface.NORMAL);
-        button.setBackground(id.equals(selected)
-                ? rounded(Color.rgb(229, 239, 255), Color.rgb(229, 239, 255), 16)
-                : rounded(Color.WHITE, Color.WHITE, 16));
-        button.setOnClickListener(v -> action.run());
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(58), 1);
-        params.setMargins(dp(2), 0, dp(2), 0);
-        nav.addView(button, params);
+    private void addNavButton(LinearLayout nav, String title, int iconResource,
+                              String id, String selected, Runnable action) {
+        boolean active = id.equals(selected);
+        LinearLayout item = vertical();
+        item.setGravity(Gravity.CENTER);
+        item.setPadding(dp(1), dp(2), dp(1), 0);
+        item.setClickable(true);
+        item.setFocusable(true);
+        item.setContentDescription(title);
+        item.setOnClickListener(v -> action.run());
+
+        FrameLayout iconHolder = new FrameLayout(this);
+        iconHolder.setBackground(active
+                ? rounded(Color.rgb(222, 237, 255), Color.rgb(222, 237, 255), 18)
+                : null);
+        ImageView icon = new ImageView(this);
+        Drawable drawable = getDrawable(iconResource).mutate();
+        drawable.setTint(active ? BLUE : TEXT);
+        icon.setImageDrawable(drawable);
+        FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(
+                dp(27), dp(27), Gravity.CENTER);
+        iconHolder.addView(icon, iconParams);
+        item.addView(iconHolder, new LinearLayout.LayoutParams(dp(58), dp(34)));
+
+        TextView label = label(title, 10, active ? BLUE : TEXT, active);
+        label.setGravity(Gravity.CENTER);
+        label.setSingleLine(true);
+        item.addView(label, new LinearLayout.LayoutParams(-1, dp(24)));
+        nav.addView(item, new LinearLayout.LayoutParams(0, dp(68), 1));
     }
 
     private void showMainMenu(View anchor) {
@@ -508,6 +541,80 @@ public class MainActivity extends Activity {
                 if (status.mine) confirmDeleteStatus(status);
                 return true;
             });
+        }));
+    }
+
+    private void showCalls() {
+        stopPolling();
+        screen = "calls";
+        LinearLayout page = vertical();
+        page.addView(mainHeader("Aramalar"));
+
+        FrameLayout content = new FrameLayout(this);
+        ListView list = plainList();
+        list.setClipToPadding(false);
+        list.setPadding(0, 0, 0, dp(82));
+        TextView empty = label("Henüz arama yok. Sağ alttaki + simgesinden bir Selam kullanıcısını internet üzerinden ara.",
+                16, MUTED, false);
+        empty.setGravity(Gravity.CENTER);
+        empty.setPadding(dp(34), dp(34), dp(34), dp(34));
+        content.addView(list, new FrameLayout.LayoutParams(-1, -1));
+        content.addView(empty, new FrameLayout.LayoutParams(-1, -1));
+        list.setEmptyView(empty);
+
+        Button newCall = primaryButton("＋");
+        newCall.setTextSize(28);
+        newCall.setContentDescription("Yeni internet araması");
+        newCall.setElevation(dp(8));
+        newCall.setBackground(rounded(BLUE, BLUE, 30));
+        newCall.setOnClickListener(v -> chooseCallChat());
+        FrameLayout.LayoutParams newCallParams = new FrameLayout.LayoutParams(
+                dp(60), dp(60), Gravity.END | Gravity.BOTTOM);
+        newCallParams.setMargins(0, 0, dp(18), dp(18));
+        content.addView(newCall, newCallParams);
+
+        page.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
+        addBottomNavigation(page, "calls");
+        setPage(page);
+        setBusy(true);
+        api.listCallHistory(uiCallback(calls -> {
+            setBusy(false);
+            list.setAdapter(new CallLogAdapter(calls));
+            list.setOnItemClickListener((parent, view, position, id) -> {
+                SupabaseClient.CallLog call = calls.get(position);
+                startAudioCall(call.conversationId, call.otherName);
+            });
+        }));
+    }
+
+    private void chooseCallChat() {
+        setBusy(true);
+        api.listChats(uiCallback(chats -> {
+            setBusy(false);
+            List<SupabaseClient.Chat> directChats = new ArrayList<>();
+            List<String> names = new ArrayList<>();
+            for (SupabaseClient.Chat chat : chats) {
+                if (!"direct".equals(chat.kind)) continue;
+                directChats.add(chat);
+                names.add(preferredName(chat.displayName, chat.username));
+            }
+            if (directChats.isEmpty()) {
+                new AlertDialog.Builder(this)
+                        .setTitle("Aranabilecek kişi yok")
+                        .setMessage("Arama başlatmak için önce rehberinden bir Selam kullanıcısıyla sohbet başlat.")
+                        .setNegativeButton("Kapat", null)
+                        .setPositiveButton("Yeni sohbet", (dialog, which) -> showContacts())
+                        .show();
+                return;
+            }
+            new AlertDialog.Builder(this)
+                    .setTitle("Kimi aramak istersin?")
+                    .setItems(names.toArray(new String[0]), (dialog, which) -> {
+                        SupabaseClient.Chat chat = directChats.get(which);
+                        startAudioCall(chat.id, names.get(which));
+                    })
+                    .setNegativeButton("Vazgeç", null)
+                    .show();
         }));
     }
 
@@ -688,6 +795,7 @@ public class MainActivity extends Activity {
                     .setItems(names, (d, which) -> {
                         pendingCameraChatId = chats.get(which).id;
                         pendingCameraChatName = names[which];
+                        pendingCameraChatCanCall = "direct".equals(chats.get(which).kind);
                         if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) launchCamera();
                         else requestPermissions(new String[]{Manifest.permission.CAMERA}, REQUEST_CAMERA_PERMISSION);
                     }).show();
@@ -911,7 +1019,7 @@ public class MainActivity extends Activity {
                         api.createGroup(title, selectedIds, uiCallback(chatId -> {
                             setBusy(false);
                             toast("Grup oluşturuldu.");
-                            openChat(chatId, title);
+                            openChat(chatId, title, false);
                         }));
                     });
                 }));
@@ -923,7 +1031,7 @@ public class MainActivity extends Activity {
         setBusy(true);
         api.startDirectChat(person.id, uiCallback(chatId -> {
             setBusy(false);
-            openChat(chatId, shownName);
+            openChat(chatId, shownName, true);
         }));
     }
 
@@ -988,7 +1096,8 @@ public class MainActivity extends Activity {
                             "image/jpeg", bytes.length, uiCallback(done -> {
                                 setBusy(false);
                                 toast("Fotoğraf " + pendingCameraChatName + " sohbetine gönderildi.");
-                                openChat(pendingCameraChatId, pendingCameraChatName);
+                                openChat(pendingCameraChatId, pendingCameraChatName,
+                                        pendingCameraChatCanCall);
                             }));
                 }
             }
@@ -1042,16 +1151,56 @@ public class MainActivity extends Activity {
             } else {
                 toast("Fotoğraf çekebilmek için kamera izni gereklidir.");
             }
+        } else if (requestCode == REQUEST_AUDIO_PERMISSION) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                launchAudioCall();
+            } else {
+                toast("İnternet araması için mikrofon izni gereklidir.");
+            }
         }
     }
 
-    private void openChat(String chatId, String chatName) {
+    private void requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                    REQUEST_NOTIFICATIONS);
+        }
+    }
+
+    private void startAudioCall(String chatId, String name) {
+        pendingCallChatId = chatId;
+        pendingCallName = name;
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                == PackageManager.PERMISSION_GRANTED) launchAudioCall();
+        else requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},
+                REQUEST_AUDIO_PERMISSION);
+    }
+
+    private void launchAudioCall() {
+        if (pendingCallChatId == null) return;
+        Intent call = new Intent(this, CallActivity.class)
+                .putExtra(CallActivity.EXTRA_CHAT_ID, pendingCallChatId)
+                .putExtra(CallActivity.EXTRA_NAME, pendingCallName)
+                .putExtra(CallActivity.EXTRA_INCOMING, false);
+        pendingCallChatId = null;
+        pendingCallName = null;
+        startActivity(call);
+    }
+
+    private void openChat(String chatId, String chatName, boolean canCall) {
         stopPolling();
         screen = "chat";
         activeChatId = chatId;
         activeMessages = new ArrayList<>();
         LinearLayout page = vertical();
         LinearLayout header = topBar(chatName, this::showHome);
+        if (canCall) {
+            ImageButton call = headerIconButton(R.drawable.ic_phone, "İnternet araması");
+            call.setOnClickListener(v -> startAudioCall(chatId, chatName));
+            header.addView(call, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        }
         Button menu = headerButton("⋮");
         menu.setTextSize(27);
         menu.setContentDescription("Sohbet menüsü");
@@ -1368,6 +1517,18 @@ public class MainActivity extends Activity {
         return button;
     }
 
+    private ImageButton headerIconButton(int iconResource, String description) {
+        ImageButton button = new ImageButton(this);
+        Drawable drawable = getDrawable(iconResource).mutate();
+        drawable.setTint(Color.WHITE);
+        button.setImageDrawable(drawable);
+        button.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        button.setPadding(dp(11), dp(11), dp(11), dp(11));
+        button.setBackgroundColor(Color.TRANSPARENT);
+        button.setContentDescription(description);
+        return button;
+    }
+
     private TextView avatar(String name, int size) {
         TextView avatar = label(initial(name), Math.max(14, size / 2 - 3), Color.WHITE, true);
         avatar.setGravity(Gravity.CENTER);
@@ -1433,6 +1594,7 @@ public class MainActivity extends Activity {
         if ("chat".equals(screen) || "contacts".equals(screen) || "group".equals(screen)
                 || "search".equals(screen) || "profile".equals(screen)
                 || "updates".equals(screen) || "communities".equals(screen)
+                || "calls".equals(screen)
                 || "settings".equals(screen)
                 || "archived".equals(screen)) showHome();
         else super.onBackPressed();
@@ -1441,6 +1603,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         stopPolling();
+        if (alerts != null) alerts.close();
         if (updateManager != null) updateManager.close();
         api.close();
         super.onDestroy();
@@ -1498,6 +1661,35 @@ public class MainActivity extends Activity {
             LinearLayout row = personRow(name, "@" + person.username, 48);
             row.addView(label("Mesaj →", 14, BLUE, true));
             row.setLayoutParams(rowParams(72));
+            return row;
+        }
+    }
+
+    private final class CallLogAdapter extends BaseAdapter {
+        private final List<SupabaseClient.CallLog> items;
+        CallLogAdapter(List<SupabaseClient.CallLog> items) { this.items = items; }
+        @Override public int getCount() { return items.size(); }
+        @Override public Object getItem(int position) { return items.get(position); }
+        @Override public long getItemId(int position) { return position; }
+        @Override public View getView(int position, View convertView, ViewGroup parent) {
+            SupabaseClient.CallLog call = items.get(position);
+            String direction = call.outgoing ? "↗ Giden" : "↙ Gelen";
+            String state;
+            if ("ended".equals(call.state)) state = "Tamamlandı";
+            else if ("declined".equals(call.state)) state = "Reddedildi";
+            else if ("missed".equals(call.state)) state = "Cevapsız";
+            else if ("accepted".equals(call.state)) state = "Bağlandı";
+            else state = "Arama";
+            LinearLayout row = personRow(call.otherName,
+                    direction + " • " + state + " • " + time(call.startedAt), 50);
+            ImageView phone = new ImageView(MainActivity.this);
+            Drawable drawable = getDrawable(R.drawable.ic_phone).mutate();
+            drawable.setTint(BLUE);
+            phone.setImageDrawable(drawable);
+            phone.setContentDescription("Tekrar ara");
+            phone.setPadding(dp(8), dp(8), dp(8), dp(8));
+            row.addView(phone, new LinearLayout.LayoutParams(dp(44), dp(44)));
+            row.setLayoutParams(rowParams(76));
             return row;
         }
     }
