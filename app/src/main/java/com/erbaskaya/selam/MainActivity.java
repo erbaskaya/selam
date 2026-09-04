@@ -468,8 +468,8 @@ public class MainActivity extends Activity {
         PopupMenu menu = new PopupMenu(this, anchor);
         menu.getMenu().add(chat.pinned ? "Sabitlemeyi kaldır" : "Sohbeti sabitle");
         menu.getMenu().add(chat.archived ? "Arşivden çıkar" : "Arşivle");
-        menu.getMenu().add("8 saat sessize al");
-        menu.getMenu().add("Sessizi kaldır");
+        if (isFuture(chat.mutedUntil)) menu.getMenu().add("Sessizi kaldır");
+        else menu.getMenu().add("8 saat sessize al");
         menu.getMenu().add("Sohbeti temizle");
         menu.setOnMenuItemClickListener(item -> {
             String title = item.getTitle().toString();
@@ -1584,6 +1584,15 @@ public class MainActivity extends Activity {
         }
     }
 
+    private static boolean isFuture(String iso) {
+        if (iso == null || iso.isEmpty() || "null".equalsIgnoreCase(iso)) return false;
+        try {
+            return Instant.parse(iso).isAfter(Instant.now());
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
     private static String spacedCode(String code) {
         if (code == null) return "";
         return code.replaceAll("(.{4})(?!$)", "$1 ");
@@ -1622,7 +1631,7 @@ public class MainActivity extends Activity {
             String subtitle = chat.lastMessage == null || chat.lastMessage.isEmpty()
                     ? "Yeni sohbet" : chat.lastMessage;
             if (chat.pinned) subtitle = "📌 " + subtitle;
-            if (chat.mutedUntil != null && !chat.mutedUntil.isEmpty()) subtitle = "🔕 " + subtitle;
+            if (isFuture(chat.mutedUntil)) subtitle = "🔕 " + subtitle;
             LinearLayout row = personRow(name, subtitle, 52);
             row.addView(label(time(chat.lastMessageAt), 12, MUTED, false));
             row.setLayoutParams(rowParams(78));

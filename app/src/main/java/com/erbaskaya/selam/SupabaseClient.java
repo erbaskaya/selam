@@ -458,7 +458,8 @@ final class SupabaseClient {
                             item.optString("username"),
                             item.optString("display_name"), item.optString("last_message"),
                             item.optString("last_message_at"), item.optBoolean("archived"),
-                            item.optBoolean("pinned"), item.optString("muted_until")
+                            item.optBoolean("pinned"), item.isNull("muted_until")
+                                    ? "" : item.optString("muted_until")
                     ));
                 }
                 callback.onSuccess(chats);
