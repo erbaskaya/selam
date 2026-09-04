@@ -2,7 +2,7 @@
 
 Selam, bağımsız çalışan mavi temalı Android ve iPhone mesajlaşma uygulamasıdır. WebView kullanmaz ve ChatGPT oturumu istemez.
 
-## Sürüm 1.4.2 özellikleri
+## Sürüm 1.4.3 özellikleri
 
 - E-posta, şifre ve ücretli SMS olmadan cihaz hesabı
 - Ad, telefon numarası ve 6 haneli kurtarma PIN'iyle kurulum
@@ -30,6 +30,7 @@ Selam, bağımsız çalışan mavi temalı Android ve iPhone mesajlaşma uygulam
 - Sohbet listesinin sağ altında her zaman görünen mavi “＋” yeni sohbet düğmesi
 - Aynı Supabase hesabını kullanan SwiftUI iPhone istemcisi
 - Harici Jitsi görüşmesi ve yanıltıcı telefonla katılma bilgileri kaldırıldı
+- Uygulama açılışında yeni sürüm kontrolü, uygulama içinden indirme ve Android kurulum ekranı
 
 ## Gizlilik ve güvenlik
 

@@ -73,6 +73,7 @@ public class MainActivity extends Activity {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable pollMessages = this::refreshMessages;
     private SupabaseClient api;
+    private UpdateManager updateManager;
     private SupabaseClient.Profile myProfile;
     private FrameLayout root;
     private ProgressBar progress;
@@ -90,6 +91,7 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(NAVY);
         getWindow().setNavigationBarColor(NAVY);
         api = new SupabaseClient(this);
+        updateManager = new UpdateManager(this);
 
         root = new FrameLayout(this);
         // Android 15+ sistem çubuklarını içerik üstüne bindirir. Kök görünüm
@@ -112,6 +114,19 @@ public class MainActivity extends Activity {
 
         if (!api.isConfigured()) showConfigurationNotice();
         else startDeviceAccount();
+        updateManager.checkForUpdates(false);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (updateManager != null) updateManager.resumeInstallIfReady();
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (updateManager != null) updateManager.close();
+        super.onDestroy();
     }
 
     private void startDeviceAccount() {
@@ -620,6 +635,10 @@ public class MainActivity extends Activity {
             qr.setBackground(rounded(Color.WHITE, BORDER, 14));
             qr.setOnClickListener(v -> showMyQr());
             form.addView(qr, margin(-1, dp(52), 0, 0, 0, 10));
+            Button updates = textButton("Güncellemeleri kontrol et");
+            updates.setBackground(rounded(Color.WHITE, BORDER, 14));
+            updates.setOnClickListener(v -> updateManager.checkForUpdates(true));
+            form.addView(updates, margin(-1, dp(52), 0, 0, 0, 10));
             EditText recoveryPin = input("Yeni 6 haneli kurtarma PIN'i",
                     InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
             form.addView(recoveryPin, margin(-1, dp(54), 0, 2, 0, 8));

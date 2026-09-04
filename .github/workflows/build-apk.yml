@@ -12,7 +12,7 @@ on:
       - ".github/workflows/build-apk.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-apk:
@@ -103,3 +103,20 @@ jobs:
           path: Selam.apk
           if-no-files-found: error
           retention-days: 30
+
+      - name: Güncelleme sürümünü yayınla
+        if: env.HAS_SIGNING == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION_NAME="$(sed -n 's/.*versionName "\([^"]*\)".*/\1/p' app/build.gradle | head -n 1)"
+          test -n "$VERSION_NAME"
+          TAG="v$VERSION_NAME"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" Selam.apk --clobber
+          else
+            gh release create "$TAG" Selam.apk \
+              --title "Selam $TAG" \
+              --notes "Selam Android $TAG imzalı güncelleme paketi."
+          fi
