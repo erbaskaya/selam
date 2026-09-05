@@ -77,6 +77,17 @@ jobs:
       - name: Android ekran ve taslak testleri
         run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
 
+      - name: Ekran ve test raporları
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Selam-test-report
+          path: |
+            app/build/test-screenshots
+            app/build/reports/tests
+            app/build/test-results
+          if-no-files-found: ignore
+
       - name: Kalıcı imza anahtarını hazırla
         if: env.HAS_SIGNING == 'true'
         env:

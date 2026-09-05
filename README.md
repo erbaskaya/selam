@@ -1,8 +1,22 @@
-# Selam Android ve iPhone
+# Selam Android
 
-Selam, bağımsız çalışan mavi temalı Android ve iPhone mesajlaşma uygulamasıdır. WebView kullanmaz ve ChatGPT oturumu istemez.
+Selam, bağımsız çalışan mavi temalı Android mesajlaşma uygulamasıdır. iPhone kaynakları korunuyor; iPhone geliştirmesi şimdilik beklemede. WebView kullanmaz ve ChatGPT oturumu istemez.
 
-## Sürüm 1.5.4 özellikleri
+## Sürüm 1.6.0 yenilikleri
+
+- Açık/koyu/sistem teması; genel ve sohbete özel balon renkleri, duvar kâğıdı ve yazı boyutu
+- Bildirim önizlemesi, ses, titreşim ve gece sessizliği tercihleri
+- Okunmamış, favori ve grup filtreleri; okunmamış sayacı
+- Mesaj yanıtlama, yıldızlama, tepki, metin iletme; 15 dakika içinde düzenleme ve silme seçenekleri
+- Sohbet geçmişinde arama, önceki mesajları yükleme, okundu gizliliği ve son görülme
+- İki dakikaya kadar sesli mesaj; göndermeden dinleme ve oynatma hızı
+- Grup adı ve üye yönetimi; grup sahipliğinin ayrılan kişiden devri
+- Kalıcı taslak, sohbete özel kişisel not ve görünen mesajları metin dosyasına kaydetme
+- Yeni hesap verilerinin PIN kurtarmasıyla korunması
+
+Kullanım, mevcut sınırlar ve WhatsApp karşılaştırması: [değerlendirme belgesi](docs/WHATSAPP-KARSILASTIRMA.md).
+
+## Mevcut özellikler
 
 - E-posta, şifre ve ücretli SMS olmadan cihaz hesabı
 - Ad, telefon numarası ve 6 haneli kurtarma PIN'iyle kurulum
@@ -61,5 +75,4 @@ Servis rolü anahtarını APK'ya veya GitHub secret'ına eklemeyin. Yalnızca is
 
 ## Sonraki sürümler
 
-Uygulama tamamen kapalıyken anlık bildirim, tam çözünürlüklü kamera,
-sesli mesaj ve mesaj yanıtlama/düzenleme/tepki sonraki geliştirme paketidir.
+Uygulama tamamen kapalıyken push bildirim, TURN destekli güvenilir arama, görüntülü arama, uçtan uca şifreleme ve tam çözünürlüklü kamera henüz tamamlanmadı. Ayrıntılı sınırlar karşılaştırma belgesindedir.
