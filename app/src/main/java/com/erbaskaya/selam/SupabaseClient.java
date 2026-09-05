@@ -365,6 +365,40 @@ class SupabaseClient {
         });
     }
 
+    /** One entry point for first installation and returning accounts. */
+    void enterProfile(String displayName, String phoneE164, String recoveryPin,
+                      Callback<Profile> callback) {
+        setupProfile(displayName, phoneE164, recoveryPin, new Callback<Profile>() {
+            @Override public void onSuccess(Profile profile) {
+                callback.onSuccess(profile);
+            }
+
+            @Override public void onError(String message) {
+                // Only the server's explicit number collision can start recovery.
+                // Network failures and validation errors must never become login attempts.
+                if (!"Bu numara kayıtlı. Hesabımı kurtar seçeneğini kullanın".equals(message)) {
+                    callback.onError(message);
+                    return;
+                }
+                recoverProfile(phoneE164, recoveryPin, new Callback<RecoveryResult>() {
+                    @Override public void onSuccess(RecoveryResult result) {
+                        if (result.success && result.profile != null && result.profile.ready) {
+                            callback.onSuccess(result.profile);
+                        } else {
+                            callback.onError(result.message == null || result.message.isEmpty()
+                                    ? "Hesap açılamadı. Numaranızı ve PIN'inizi kontrol edin."
+                                    : result.message);
+                        }
+                    }
+
+                    @Override public void onError(String error) {
+                        callback.onError(error);
+                    }
+                });
+            }
+        });
+    }
+
     void setupProfile(String displayName, String phoneE164, String recoveryPin,
                       Callback<Profile> callback) {
         executor.execute(() -> {

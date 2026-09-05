@@ -253,7 +253,7 @@ public class MainActivity extends Activity {
         page.addView(logo, new LinearLayout.LayoutParams(dp(88), dp(88)));
         page.addView(labelCentered("Selam'a hoş geldin", 28, TEXT, true),
                 margin(-1, -2, 0, 14, 0, 6));
-        page.addView(labelCentered("E-posta ve ücretli SMS olmadan hesabını oluştur. 6 haneli PIN'in yeniden kurulumda hesabını geri getirir.", 16, MUTED, false),
+        page.addView(labelCentered("Numaran ve 6 haneli PIN'inle devam et. Hesabın varsa açılır; ilk kez kullanıyorsan yeni hesabın oluşturulur.", 16, MUTED, false),
                 margin(-1, -2, 0, 0, 0, 26));
 
         EditText displayName = input("Adınız ve soyadınız", InputType.TYPE_CLASS_TEXT);
@@ -261,24 +261,26 @@ public class MainActivity extends Activity {
         EditText phone = input("Telefon numaranız (05xx xxx xx xx)",
                 InputType.TYPE_CLASS_PHONE);
         page.addView(phone, margin(-1, dp(56), 0, 0, 0, 12));
-        EditText pin = input("6 haneli kurtarma PIN'i",
+        EditText pin = input("6 haneli PIN'iniz",
                 InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
         pin.setMaxLines(1);
+        pin.setSaveEnabled(false);
         page.addView(pin, margin(-1, dp(56), 0, 0, 0, 14));
 
-        TextView note = label("Bu numaraya SMS gönderilmez. PIN'ini güvenli bir yere kaydet; uygulamayı silip yeniden kurarsan numaran ve PIN'inle sohbetlerini geri alabilirsin.", 14, MUTED, false);
+        TextView note = label("SMS kodu gönderilmez. İlk kayıtta PIN'ini kendin belirle. Yeniden kurduğunda aynı numarayı ve önceden belirlediğin PIN'i yazıp Devam et'e dokun.", 14, MUTED, false);
         note.setPadding(dp(14), dp(12), dp(14), dp(12));
-        note.setBackground(rounded(Color.rgb(232, 241, 255), Color.rgb(202, 220, 248), 12));
+        note.setBackground(rounded(SURFACE, BORDER, 12));
         page.addView(note, margin(-1, -2, 0, 0, 0, 18));
 
         Button continueButton = primaryButton("Devam et");
         page.addView(continueButton, new LinearLayout.LayoutParams(-1, dp(56)));
         continueButton.setOnClickListener(v -> {
+            if (!continueButton.isEnabled()) return;
             String nameValue = displayName.getText().toString().trim();
             String normalized = normalizePhone(phone.getText().toString());
             String pinValue = pin.getText().toString().trim();
-            if (nameValue.length() < 2) {
-                toast("Lütfen adınızı yazın.");
+            if (nameValue.length() < 2 || nameValue.length() > 60) {
+                toast("Adınızı 2-60 karakter arasında yazın.");
                 return;
             }
             if (normalized == null) {
@@ -290,40 +292,16 @@ public class MainActivity extends Activity {
                 return;
             }
             setBusy(true);
+            continueButton.setEnabled(false);
+            continueButton.setText("Hesabın açılıyor…");
             hideKeyboard();
-            api.setupProfile(nameValue, normalized, pinValue, uiCallback(profile -> {
+            api.enterProfile(nameValue, normalized, pinValue, uiCallback(profile -> {
                 myProfile = profile;
-                setBusy(false);
-                toast("Cihaz hesabın hazır.");
-                showContacts();
-            }));
-        });
-
-        Button recoverButton = textButton("Hesabımı geri yükle");
-        recoverButton.setBackground(rounded(SURFACE, BLUE, 14));
-        page.addView(recoverButton, margin(-1, dp(54), 0, 10, 0, 0));
-        recoverButton.setOnClickListener(v -> {
-            String normalized = normalizePhone(phone.getText().toString());
-            String pinValue = pin.getText().toString().trim();
-            if (normalized == null) {
-                toast("Kayıtlı telefon numaranızı yazın.");
-                return;
-            }
-            if (!pinValue.matches("^[0-9]{6}$")) {
-                toast("6 haneli PIN'inizi yazın.");
-                return;
-            }
-            setBusy(true);
-            hideKeyboard();
-            api.recoverProfile(normalized, pinValue, uiCallback(result -> {
-                setBusy(false);
-                if (!result.success || result.profile == null) {
-                    toast(result.message.isEmpty() ? "Hesap geri yüklenemedi." : result.message);
-                    return;
-                }
-                myProfile = result.profile;
-                toast(result.message);
-                showHome();
+                pin.setText("");
+                loadProfile();
+            }, error -> {
+                continueButton.setEnabled(true);
+                continueButton.setText("Devam et");
             }));
         });
         setPage(scroll);

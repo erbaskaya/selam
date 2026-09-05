@@ -2,6 +2,12 @@
 
 Selam, bağımsız çalışan mavi temalı Android mesajlaşma uygulamasıdır. iPhone kaynakları korunuyor; iPhone geliştirmesi şimdilik beklemede. WebView kullanmaz ve ChatGPT oturumu istemez.
 
+## Sürüm 1.6.1 yenilikleri
+
+- Kayıt ve geri yükleme için tek **Devam et** düğmesi: kayıtlı numarada mevcut PIN doğrulanır; yeni numarada hesap oluşturulur
+- Yanlış PIN ve deneme sınırı sunucuda uygulanmaya devam eder; ağ hatalarında otomatik kurtarma denenmez
+- Hesap açılır açılmaz bildirim ve tercih eşitlemesi başlar
+
 ## Sürüm 1.6.0 yenilikleri
 
 - Açık/koyu/sistem teması; genel ve sohbete özel balon renkleri, duvar kâğıdı ve yazı boyutu
@@ -57,7 +63,9 @@ Rehberdeki kişiler veritabanında saklanmaz. Telefon numaraları yalnızca eşl
 
 SMS doğrulaması kullanılmadığı için kullanıcıların yazdığı telefon numarası operatör tarafından doğrulanmış sayılmaz. QR/güvenlik kodu, konuşulan kişinin kimliğini karşılıklı kontrol etmek için kullanılır. Kurtarma PIN'i bcrypt ile özetlenir; düz PIN veritabanına yazılmaz. Yanlış kurtarma denemeleri cihaz ve hedef numara bazında sınırlandırılır.
 
-Cihaz hesabının oturumu uygulama verilerinde tutulur. Uygulama verileri silinir veya telefon değiştirilirse giriş ekranındaki **Hesabımı geri yükle** seçeneğiyle telefon numarası ve 6 haneli PIN kullanılır. Sürüm 1.4.0'dan yükselten mevcut kullanıcıların uygulamayı silmeden önce Ayarlar'dan kurtarma PIN'i belirlemesi gerekir.
+Cihaz hesabının oturumu uygulama verilerinde tutulur. Uygulama verileri silinir veya telefon değiştirilirse giriş ekranına adınızı, kayıtlı telefon numaranızı ve önceden belirlediğiniz 6 haneli PIN'i yazıp **Devam et** düğmesine dokunun. Numara zaten kayıtlıysa aynı düğme mevcut PIN'i doğrular ve hesabı açar; ayrı bir kurtarma düğmesi yoktur. Yanlış PIN mevcut hesabın üzerine yazılmaz.
+
+Uygulamayı kaldırmak sunucudaki hesabı otomatik silmez. Sürüm 1.4.0'dan yükselten mevcut kullanıcıların uygulamayı silmeden önce Ayarlar'dan kurtarma PIN'i belirlemesi gerekir. PIN tanımlanmamış eski bir hesap, yalnızca telefon numarası yazılarak açılamaz.
 
 ## Supabase bağlantısı
 
