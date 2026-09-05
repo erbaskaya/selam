@@ -450,6 +450,7 @@ public class MainActivity extends Activity {
         menu.getMenu().add("Yeni topluluk");
         menu.getMenu().add("Arşivlenmiş sohbetler");
         menu.getMenu().add("QR kodum");
+        if ("calls".equals(screen)) menu.getMenu().add("Arama kayıtlarını temizle");
         menu.getMenu().add("Ayarlar");
         menu.setOnMenuItemClickListener(item -> {
             String title = item.getTitle().toString();
@@ -458,6 +459,7 @@ public class MainActivity extends Activity {
             else if ("Yeni topluluk".equals(title)) showCreateCommunityDialog();
             else if ("Arşivlenmiş sohbetler".equals(title)) showArchivedChats();
             else if ("QR kodum".equals(title)) showMyQr();
+            else if ("Arama kayıtlarını temizle".equals(title)) confirmClearCallHistory();
             else if ("Ayarlar".equals(title)) showSettings();
             return true;
         });
@@ -584,7 +586,43 @@ public class MainActivity extends Activity {
                 SupabaseClient.CallLog call = calls.get(position);
                 startAudioCall(call.conversationId, call.otherName);
             });
+            list.setOnItemLongClickListener((parent, view, position, id) -> {
+                confirmDeleteCallLog(calls.get(position));
+                return true;
+            });
         }));
+    }
+
+    private void confirmDeleteCallLog(SupabaseClient.CallLog call) {
+        new AlertDialog.Builder(this)
+                .setTitle("Arama kaydı silinsin mi?")
+                .setMessage(call.otherName + " ile yapılan bu arama yalnızca sizin geçmişinizden kaldırılacak.")
+                .setNegativeButton("Vazgeç", null)
+                .setPositiveButton("Sil", (dialog, which) -> {
+                    setBusy(true);
+                    api.hideCallHistoryEntry(call.id, uiCallback(done -> {
+                        setBusy(false);
+                        toast("Arama kaydı silindi.");
+                        showCalls();
+                    }));
+                })
+                .show();
+    }
+
+    private void confirmClearCallHistory() {
+        new AlertDialog.Builder(this)
+                .setTitle("Arama geçmişi temizlensin mi?")
+                .setMessage("Tüm gelen, giden ve cevapsız arama kayıtları yalnızca sizin hesabınızdan kaldırılacak.")
+                .setNegativeButton("Vazgeç", null)
+                .setPositiveButton("Tümünü temizle", (dialog, which) -> {
+                    setBusy(true);
+                    api.clearCallHistory(uiCallback(done -> {
+                        setBusy(false);
+                        toast("Arama geçmişi temizlendi.");
+                        showCalls();
+                    }));
+                })
+                .show();
     }
 
     private void chooseCallChat() {

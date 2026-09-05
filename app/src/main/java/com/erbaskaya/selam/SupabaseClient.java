@@ -787,6 +787,23 @@ final class SupabaseClient {
         });
     }
 
+    void hideCallHistoryEntry(String callId, Callback<Boolean> callback) {
+        simpleCallAction("hide_audio_call_history_entry", callId, null, callback);
+    }
+
+    void clearCallHistory(Callback<Boolean> callback) {
+        executor.execute(() -> {
+            try {
+                Response response = authorizedRequest("POST",
+                        "/rest/v1/rpc/clear_audio_call_history", new JSONObject());
+                ensureSuccess(response);
+                callback.onSuccess(true);
+            } catch (Exception exception) {
+                callback.onError(friendly(exception));
+            }
+        });
+    }
+
     void getCallState(String callId, Callback<CallState> callback) {
         executor.execute(() -> {
             try {
