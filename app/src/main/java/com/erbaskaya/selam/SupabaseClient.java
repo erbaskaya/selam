@@ -23,7 +23,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-final class SupabaseClient {
+class SupabaseClient {
     interface Callback<T> {
         void onSuccess(T value);
         void onError(String message);
@@ -80,6 +80,9 @@ final class SupabaseClient {
     }
 
     static final class Chat {
+        boolean favorite;
+        long unreadCount;
+        String otherUserId;
         final String id;
         final String kind;
         final String username;
@@ -165,6 +168,15 @@ final class SupabaseClient {
     }
 
     static final class Message {
+        String senderName = "";
+        String replyPreview = "";
+        String reactions = "";
+        String editedAt = "";
+        boolean deleted;
+        boolean starred;
+        boolean readByOther;
+        long replyToId;
+        String fingerprint = "";
         final long id;
         final String senderId;
         final String body;
@@ -189,7 +201,20 @@ final class SupabaseClient {
             this.fileSize = fileSize;
         }
 
-        boolean isFile() { return "file".equals(type); }
+        boolean isFile() { return !deleted && "file".equals(type); }
+        boolean isAudio() { return isFile() && fileMimeType != null && fileMimeType.startsWith("audio/"); }
+        static Message parse(JSONObject item) {
+            Message m = new Message(item.optLong("message_id"), item.optString("sender_id"),
+                item.optString("message_body"), item.optString("created_at"),item.optString("message_type","text"),
+                item.optString("file_path"),item.optString("file_name"),item.optString("file_mime_type"),item.optLong("file_size_bytes"));
+            m.senderName=item.optString("sender_name","");
+            m.replyPreview=item.isNull("reply_preview")?"":item.optString("reply_preview","");
+            m.replyToId=item.optLong("reply_to_id");m.reactions=item.optString("reactions","");
+            m.editedAt=item.isNull("edited_at")?"":item.optString("edited_at","");
+            m.deleted=!item.isNull("deleted_at")&&item.has("deleted_at");
+            m.starred=item.optBoolean("starred");m.readByOther=item.optBoolean("read_by_other");
+            m.fingerprint=item.toString();return m;
+        }
     }
 
     static final class MessageNotification {
@@ -447,7 +472,7 @@ final class SupabaseClient {
     void listChats(Callback<List<Chat>> callback) {
         executor.execute(() -> {
             try {
-                Response response = authorizedRequest("POST", "/rest/v1/rpc/list_my_chats", new JSONObject());
+                Response response = authorizedRequest("POST", "/rest/v1/rpc/selam_chats", new JSONObject());
                 ensureSuccess(response);
                 JSONArray array = new JSONArray(response.body);
                 List<Chat> chats = new ArrayList<>();
@@ -461,6 +486,9 @@ final class SupabaseClient {
                             item.optBoolean("pinned"), item.isNull("muted_until")
                                     ? "" : item.optString("muted_until")
                     ));
+                    Chat added=chats.get(chats.size()-1);
+                    added.favorite=item.optBoolean("favorite");added.unreadCount=item.optLong("unread_count");
+                    added.otherUserId=item.optString("other_user_id","");
                 }
                 callback.onSuccess(chats);
             } catch (Exception exception) {
@@ -678,25 +706,28 @@ final class SupabaseClient {
     }
 
     void listMessages(String conversationId, Callback<List<Message>> callback) {
-        executor.execute(() -> {
-            try {
-                JSONObject payload = new JSONObject().put("chat_id", conversationId);
-                Response response = authorizedRequest("POST", "/rest/v1/rpc/list_chat_messages", payload);
-                ensureSuccess(response);
-                JSONArray array = new JSONArray(response.body);
-                List<Message> messages = new ArrayList<>();
-                for (int i = 0; i < array.length(); i++) {
-                    JSONObject item = array.getJSONObject(i);
-                    messages.add(new Message(item.optLong("message_id"),
-                            item.optString("sender_id"), item.optString("message_body"),
-                            item.optString("created_at"), item.optString("message_type", "text"),
-                            item.optString("file_path"), item.optString("file_name"),
-                            item.optString("file_mime_type"), item.optLong("file_size_bytes")));
-                }
-                callback.onSuccess(messages);
-            } catch (Exception exception) {
-                callback.onError(friendly(exception));
-            }
+        messages(conversationId,"",false,null,callback);
+    }
+
+    static JSONObject json(Object... pairs) {
+        JSONObject result=new JSONObject();
+        try {for(int i=0;i<pairs.length;i+=2) result.put((String)pairs[i],pairs[i+1]==null?JSONObject.NULL:pairs[i+1]);}
+        catch(JSONException e){throw new IllegalArgumentException(e);}
+        return result;
+    }
+    void rpc(String name,JSONObject payload,Callback<String> callback) {
+        executor.execute(()->{
+            try {Response response=authorizedRequest("POST","/rest/v1/rpc/"+name,payload);
+                ensureSuccess(response);callback.onSuccess(response.body);
+            }catch(Exception e){callback.onError(friendly(e));}
+        });
+    }
+    void messages(String chatId,String query,boolean starred,Long before,Callback<List<Message>> callback) {
+        rpc("selam_messages",json("p_chat_id",chatId,"p_query",query,"p_starred",starred,"p_before",before),new Callback<String>(){
+            public void onSuccess(String body){try{JSONArray array=new JSONArray(body);List<Message> messages=new ArrayList<>();
+                for(int i=0;i<array.length();i++)messages.add(Message.parse(array.getJSONObject(i)));callback.onSuccess(messages);
+            }catch(Exception e){callback.onError(friendly(e));}}
+            public void onError(String m){callback.onError(m);}
         });
     }
 

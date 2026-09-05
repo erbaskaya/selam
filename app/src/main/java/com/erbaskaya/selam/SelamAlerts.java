@@ -97,19 +97,26 @@ final class SelamAlerts {
     }
 
     private void postMessage(SupabaseClient.MessageNotification item) {
+        if(item.conversationId.equals(ChatActivity.foregroundChat)) return;
+        Appearance look=new Appearance(activity);
+        boolean sound=look.sound()&&!look.quiet(),vibrate=look.vibration()&&!look.quiet();
+        String channel=messageChannel(sound,vibrate);
         if (!canNotify()) {
-            playDefaultSound(RingtoneManager.TYPE_NOTIFICATION);
+            if(sound)playDefaultSound(RingtoneManager.TYPE_NOTIFICATION);
+            if(vibrate){android.os.Vibrator vibrator=(android.os.Vibrator)activity.getSystemService(Context.VIBRATOR_SERVICE);if(vibrator!=null)vibrator.vibrate(android.os.VibrationEffect.createOneShot(160,android.os.VibrationEffect.DEFAULT_AMPLITUDE));}
             return;
         }
-        Intent open = new Intent(activity, MainActivity.class)
+        Intent open = new Intent(activity, MainActivity.class).putExtra("open_chat_id",item.conversationId)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent content = PendingIntent.getActivity(activity, (int) (item.id & 0x7fffffff),
                 open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        Notification notification = new Notification.Builder(activity, MESSAGE_CHANNEL)
+        Notification notification = new Notification.Builder(activity, channel)
                 .setSmallIcon(R.drawable.ic_nav_chats)
-                .setContentTitle(item.senderName)
-                .setContentText(item.preview)
-                .setStyle(new Notification.BigTextStyle().bigText(item.preview))
+                .setContentTitle(look.preview()?item.senderName:"Selam")
+                .setContentText(look.preview()?item.preview:"Yeni mesajınız var")
+                .setVisibility(Notification.VISIBILITY_PRIVATE)
+                .setPublicVersion(new Notification.Builder(activity,channel).setSmallIcon(R.drawable.ic_nav_chats).setContentTitle("Selam").setContentText("Yeni mesajınız var").build())
+                .setStyle(new Notification.BigTextStyle().bigText(look.preview()?item.preview:"Yeni mesajınız var"))
                 .setContentIntent(content)
                 .setAutoCancel(true)
                 .setCategory(Notification.CATEGORY_MESSAGE)
@@ -118,6 +125,7 @@ final class SelamAlerts {
     }
 
     private void postIncomingCall(SupabaseClient.IncomingCall call) {
+        activity.runOnUiThread(()->{ChatActivity chat=ChatActivity.foreground.get();if(chat!=null)chat.incomingCall(call);});
         if (activity instanceof MainActivity && activity.hasWindowFocus()) {
             activity.runOnUiThread(() -> ((MainActivity) activity).showIncomingCall(call));
         }
@@ -157,18 +165,15 @@ final class SelamAlerts {
         } catch (Exception ignored) { }
     }
 
+    private String messageChannel(boolean sound,boolean vibrate){
+        String id="selam_messages_"+(sound?"sound":"silent")+(vibrate?"_vibrate":"");
+        NotificationChannel channel=new NotificationChannel(id,"Mesajlar • "+(sound?"sesli":"sessiz")+(vibrate?" • titreşim":""),NotificationManager.IMPORTANCE_HIGH);
+        channel.enableVibration(vibrate);channel.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
+        channel.setSound(sound?RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION):null,
+            new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION_COMMUNICATION_INSTANT).build());
+        notifications.createNotificationChannel(channel);return id;
+    }
     private void createChannels() {
-        Uri messageSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
-        AudioAttributes messageAudio = new AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_NOTIFICATION_COMMUNICATION_INSTANT)
-                .build();
-        NotificationChannel messages = new NotificationChannel(MESSAGE_CHANNEL,
-                "Selam mesajları", NotificationManager.IMPORTANCE_HIGH);
-        messages.setDescription("Yeni Selam mesajları");
-        messages.enableVibration(true);
-        messages.setSound(messageSound, messageAudio);
-        notifications.createNotificationChannel(messages);
-
         Uri callSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
         AudioAttributes callAudio = new AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE).build();

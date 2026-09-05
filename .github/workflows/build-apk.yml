@@ -3,9 +3,11 @@ name: Selam APK Oluştur
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, selam-v160]
     paths:
       - "app/**"
+      - "supabase/**"
+      - "tests/**"
       - "build.gradle"
       - "settings.gradle"
       - "gradle.properties"
@@ -14,8 +16,37 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: selam-apk-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  database-tests:
+    name: İzole mesajlaşma ve yetki testleri
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: isolated-ci-only
+          POSTGRES_DB: selam_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: isolated-ci-only
+      PGDATABASE: selam_test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Şema ve erişim kurallarını doğrula
+        run: bash tests/run-db-tests.sh
   build-apk:
+    needs: database-tests
     name: Android APK
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -42,6 +73,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.5.0"
+
+      - name: Android ekran ve taslak testleri
+        run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
 
       - name: Kalıcı imza anahtarını hazırla
         if: env.HAS_SIGNING == 'true'
@@ -105,7 +139,7 @@ jobs:
           retention-days: 30
 
       - name: Güncelleme sürümünü yayınla
-        if: env.HAS_SIGNING == 'true'
+        if: env.HAS_SIGNING == 'true' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
