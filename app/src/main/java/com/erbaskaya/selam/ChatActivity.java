@@ -41,6 +41,7 @@ public class ChatActivity extends Activity {
     private EditText composer;
     private TextView status,reply,heading;
     private Button send,older;
+    private LinearLayout historyControls;
     private SupabaseClient.Message replying;
     private SharedPreferences drafts;
     private MediaRecorder recorder;
@@ -82,7 +83,7 @@ public class ChatActivity extends Activity {
         if(direct){ImageButton phone=new ImageButton(this);phone.setImageResource(R.drawable.ic_phone);phone.setColorFilter(look.accent(chatId));phone.setBackgroundColor(Color.TRANSPARENT);phone.setContentDescription("İnternet araması");phone.setOnClickListener(v->startActivity(new Intent(this,CallActivity.class).putExtra(CallActivity.EXTRA_CHAT_ID,chatId).putExtra(CallActivity.EXTRA_NAME,chatName).putExtra(CallActivity.EXTRA_INCOMING,false)));bar.addView(phone,size(48,48));}
         bar.addView(action("⋮","Sohbet seçenekleri",this::menu),size(48,56));page.addView(bar);
         status=text("Bağlanıyor…",12,look.muted(),false);status.setPadding(dp(16),dp(4),dp(16),dp(4));status.setOnClickListener(v->refresh(true));page.addView(status);
-        LinearLayout controls=row();older=action("Önceki mesajlar","Önceki mesajları yükle",this::loadOlder);older.setTextSize(13);controls.addView(older,new LinearLayout.LayoutParams(0,dp(40),1));
+        LinearLayout controls=row();historyControls=controls;older=action("Önceki mesajlar","Önceki mesajları yükle",this::loadOlder);older.setTextSize(13);controls.addView(older,new LinearLayout.LayoutParams(0,dp(40),1));
         Button latest=action("En yeni ↓","En yeni mesajlara dön",()->{olderMode=false;query="";starred=false;fingerprint="";refresh(true);});latest.setTextSize(13);controls.addView(latest,new LinearLayout.LayoutParams(0,dp(40),1));page.addView(controls);
         FrameLayout area=new FrameLayout(this);area.setBackgroundColor(look.chatBackground(chatId));
         String photo=look.value("photo",chatId,"");if(!photo.isEmpty()){BitmapDrawable drawable=new BitmapDrawable(getResources(),photo);drawable.setGravity(Gravity.FILL);area.setBackground(drawable);}
@@ -111,12 +112,12 @@ public class ChatActivity extends Activity {
             boolean bottom=list.getCount()==0||list.getLastVisiblePosition()>=list.getCount()-2;
             int first=list.getFirstVisiblePosition(),offset=list.getChildCount()>0?list.getChildAt(0).getTop():0;
             if(!fp.toString().equals(fingerprint)||immediate){messages=items;fingerprint=fp.toString();list.setAdapter(new MessagesAdapter());if(bottom||immediate)list.setSelection(items.size()-1);else list.setSelectionFromTop(first,offset);}
-            older.setEnabled(items.size()==100);status.setText(starred?"Yıldızlı mesajlar":!query.isEmpty()?"Arama: "+query:items.isEmpty()?"İlk mesajı gönderin":"");
+            older.setEnabled(items.size()==100);historyControls.setVisibility(items.size()==100||starred||!query.isEmpty()?View.VISIBLE:View.GONE);status.setText(starred?"Yıldızlı mesajlar":!query.isEmpty()?"Arama: "+query:items.isEmpty()?"İlk mesajı gönderin":"");status.setVisibility(status.getText().length()==0?View.GONE:View.VISIBLE);
             list.post(this::markRead);handler.postDelayed(poll,2500);
-        },error->{fetching=false;status.setText(error+" · Yeniden denemek için dokunun");handler.postDelayed(poll,5000);}));
+        },error->{fetching=false;status.setVisibility(View.VISIBLE);status.setText(error+" · Yeniden denemek için dokunun");handler.postDelayed(poll,5000);}));
     }
     private void markRead(){if(!active||olderMode||starred||!query.isEmpty()||messages.isEmpty()||list.getLastVisiblePosition()<messages.size()-1)return;long id=messages.get(messages.size()-1).id;if(id<=markedRead)return;markedRead=id;api.rpc("selam_mark_read",SupabaseClient.json("p_chat_id",chatId,"p_message_id",id),cb(s->{},s->markedRead=0));}
-    private void loadOlder(){if(fetching||messages.isEmpty())return;fetching=true;olderMode=true;api.messages(chatId,query,starred,messages.get(0).id,cb(items->{fetching=false;int count=items.size();messages.addAll(0,items);list.setAdapter(new MessagesAdapter());list.setSelection(count);older.setEnabled(count==100);status.setText("Önceki mesajlar · Yeni mesajlar için En yeni'ye dokunun");},s->{fetching=false;toast(s);}));}
+    private void loadOlder(){if(fetching||messages.isEmpty())return;fetching=true;olderMode=true;api.messages(chatId,query,starred,messages.get(0).id,cb(items->{fetching=false;int count=items.size();messages.addAll(0,items);list.setAdapter(new MessagesAdapter());list.setSelection(count);older.setEnabled(count==100);status.setVisibility(View.VISIBLE);status.setText("Önceki mesajlar · Yeni mesajlar için En yeni'ye dokunun");},s->{fetching=false;toast(s);}));}
     private void send(){if(sending)return;String body=composer.getText().toString().trim();if(body.isEmpty())return;sending=true;send.setEnabled(false);Long replyId=replying==null?null:replying.id;
         api.rpc("selam_send",SupabaseClient.json("p_chat_id",chatId,"p_body",body,"p_reply_to",replyId),cb(s->{sending=false;send.setEnabled(true);if(composer.getText().toString().trim().equals(body))composer.setText("");replying=null;updateReply();olderMode=false;query="";starred=false;refresh(true);},s->{sending=false;send.setEnabled(true);toast(s);}));}
     private void menu(){String[] choices={"Sohbette ara","Yıldızlı mesajlar","Sohbet teması ve duvar kâğıdı",direct?"Kişi bilgisi":"Grup bilgisi ve üyeler","Bu sohbete özel notum","Görünen mesajları dışa aktar","Sohbeti temizle"};new AlertDialog.Builder(this).setTitle(chatName).setItems(choices,(d,i)->{switch(i){case 0:editDialog("Sohbette ara",query,v->{query=v;starred=false;olderMode=false;refresh(true);});break;case 1:starred=true;query="";olderMode=false;refresh(true);break;case 2:startActivity(new Intent(this,AppearanceActivity.class).putExtra("chat_id",chatId));break;case 3:showInfo();break;case 4:editDialog("Özel not • yalnızca bu cihazda",drafts.getString("note:"+chatId,""),v->drafts.edit().putString("note:"+chatId,v).apply());break;case 5:export();break;case 6:new AlertDialog.Builder(this).setTitle("Sohbet temizlensin mi?").setMessage("Mesajlar yalnızca sizin sohbet görünümünüzden kaldırılır.").setNegativeButton("Vazgeç",null).setPositiveButton("Temizle",(a,b)->api.deleteChat(chatId,cb(done->{olderMode=false;refresh(true);}))).show();}}).show();}

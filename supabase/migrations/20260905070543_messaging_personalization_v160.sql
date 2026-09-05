@@ -7,22 +7,30 @@ alter table public.conversation_user_states add column if not exists last_read_i
 alter table public.conversation_user_states add column if not exists favorite boolean not null default false;
 alter table public.user_settings add column if not exists personalization jsonb not null default '{}'::jsonb;
 create table if not exists public.message_user_states (
-  user_id uuid not null references auth.users(id) on delete cascade,
+  account_code text not null references public.profiles(safety_code) on delete cascade,
   message_id bigint not null references public.messages(id) on delete cascade,
   starred boolean not null default false, hidden boolean not null default false,
-  primary key(user_id, message_id)
+  primary key(account_code, message_id)
 );
 create index if not exists message_user_states_message_idx on public.message_user_states(message_id);
 create table if not exists public.message_reactions (
   message_id bigint not null references public.messages(id) on delete cascade,
-  user_id uuid not null references auth.users(id) on delete cascade,
+  account_code text not null references public.profiles(safety_code) on delete cascade,
   emoji text not null check (emoji in ('👍','❤️','😂','😮','😢','🙏')),
-  primary key(message_id,user_id)
+  primary key(message_id,account_code)
 );
-create index if not exists message_reactions_user_idx on public.message_reactions(user_id);
+create index if not exists message_reactions_account_idx on public.message_reactions(account_code);
 alter table public.message_user_states enable row level security;
 alter table public.message_reactions enable row level security;
 revoke all on public.message_user_states, public.message_reactions from public, anon, authenticated;
+
+-- Profile safety_code is a stable account identifier across existing PIN recovery.
+-- Clients cannot choose it in these tables; authorization resolves it from auth.uid().
+create or replace function private.selam_account_code() returns text
+language sql stable security definer set search_path = '' as $$
+ select p.safety_code from public.profiles p where p.id=auth.uid();
+$$;
+revoke all on function private.selam_account_code() from public,anon,authenticated;
 
 create or replace function private.selam_visible_message(p_message_id bigint) returns boolean
 language sql stable security definer set search_path = '' as $$
@@ -30,7 +38,7 @@ language sql stable security definer set search_path = '' as $$
    select 1 from public.messages m
    join public.conversation_members cm on cm.conversation_id=m.conversation_id and cm.user_id=auth.uid()
    left join public.conversation_user_states cs on cs.conversation_id=m.conversation_id and cs.user_id=auth.uid()
-   left join public.message_user_states us on us.message_id=m.id and us.user_id=auth.uid()
+   left join public.message_user_states us on us.message_id=m.id and us.account_code=private.selam_account_code()
    where m.id=p_message_id and auth.uid() is not null and not coalesce(us.hidden,false)
      and (cs.cleared_at is null or m.created_at>cs.cleared_at)
  );
@@ -55,7 +63,7 @@ begin
       where other.conversation_id=p_chat_id and other.user_id<>auth.uid() and rs.last_read_id>=m.id and coalesce(other_settings.read_receipts,true)
     ) else false end read_by_other
   from public.messages m join public.profiles p on p.id=m.sender_id
-  left join public.message_user_states us on us.message_id=m.id and us.user_id=auth.uid()
+  left join public.message_user_states us on us.message_id=m.id and us.account_code=private.selam_account_code()
   left join public.conversation_user_states cs on cs.conversation_id=p_chat_id and cs.user_id=auth.uid()
   left join public.user_settings own_settings on own_settings.user_id=auth.uid()
   left join public.messages original on original.id=m.reply_to_id and original.conversation_id=p_chat_id
@@ -88,17 +96,17 @@ begin
  if not private.selam_visible_message(p_message_id) then raise exception 'Bu mesaja erişiminiz yok'; end if;
  select * into msg from public.messages where id=p_message_id for update;
  if p_action='hide' then
-   insert into public.message_user_states(user_id,message_id,hidden) values(auth.uid(),p_message_id,true)
-     on conflict(user_id,message_id) do update set hidden=true;
+   insert into public.message_user_states(account_code,message_id,hidden) values(private.selam_account_code(),p_message_id,true)
+     on conflict(account_code,message_id) do update set hidden=true;
  elsif p_action='star' and msg.deleted_at is null then
-   insert into public.message_user_states(user_id,message_id,starred) values(auth.uid(),p_message_id,true)
-     on conflict(user_id,message_id) do update set starred=not public.message_user_states.starred;
+   insert into public.message_user_states(account_code,message_id,starred) values(private.selam_account_code(),p_message_id,true)
+     on conflict(account_code,message_id) do update set starred=not public.message_user_states.starred;
  elsif p_action='react' and msg.deleted_at is null then
    if p_value not in ('👍','❤️','😂','😮','😢','🙏') then raise exception 'Tepki geçersiz'; end if;
-   select emoji into chosen from public.message_reactions where message_id=p_message_id and user_id=auth.uid();
-   if chosen=p_value then delete from public.message_reactions where message_id=p_message_id and user_id=auth.uid();
-   else insert into public.message_reactions(message_id,user_id,emoji) values(p_message_id,auth.uid(),p_value)
-     on conflict(message_id,user_id) do update set emoji=excluded.emoji; end if;
+   select emoji into chosen from public.message_reactions where message_id=p_message_id and account_code=private.selam_account_code();
+   if chosen=p_value then delete from public.message_reactions where message_id=p_message_id and account_code=private.selam_account_code();
+   else insert into public.message_reactions(message_id,account_code,emoji) values(p_message_id,private.selam_account_code(),p_value)
+     on conflict(message_id,account_code) do update set emoji=excluded.emoji; end if;
  elsif p_action='edit' and msg.deleted_at is null then
    if msg.sender_id<>auth.uid() or msg.message_type<>'text' or msg.created_at<clock_timestamp()-interval '15 minutes' then
      raise exception 'Yalnızca kendi metin mesajınızı ilk 15 dakikada düzenleyebilirsiniz'; end if;
@@ -126,12 +134,12 @@ language sql stable security definer set search_path = '' as $$
  select coalesce(jsonb_agg(to_jsonb(c)||jsonb_build_object(
    'favorite',coalesce(cs.favorite,false),
    'unread_count',(select count(*) from public.messages m
-       left join public.message_user_states ms on ms.message_id=m.id and ms.user_id=auth.uid()
+       left join public.message_user_states ms on ms.message_id=m.id and ms.account_code=private.selam_account_code()
        where m.conversation_id=c.conversation_id and m.sender_id<>auth.uid() and m.deleted_at is null
        and m.id>coalesce(cs.last_read_id,0) and not coalesce(ms.hidden,false)
        and (cs.cleared_at is null or m.created_at>cs.cleared_at)),
    'last_message',coalesce((select m.body from public.messages m
-       left join public.message_user_states ms on ms.message_id=m.id and ms.user_id=auth.uid()
+       left join public.message_user_states ms on ms.message_id=m.id and ms.account_code=private.selam_account_code()
        where m.conversation_id=c.conversation_id and not coalesce(ms.hidden,false)
        and (cs.cleared_at is null or m.created_at>cs.cleared_at) order by m.id desc limit 1),''))
    order by c.pinned desc,c.last_message_at desc nulls last),'[]'::jsonb)
@@ -311,7 +319,7 @@ as $$
     and m.sender_id <> auth.uid()
     and m.deleted_at is null
     and m.id > coalesce(state.last_read_id,0)
-    and not exists(select 1 from public.message_user_states ms where ms.message_id=m.id and ms.user_id=auth.uid() and ms.hidden)
+    and not exists(select 1 from public.message_user_states ms where ms.message_id=m.id and ms.account_code=private.selam_account_code() and ms.hidden)
     and m.id > greatest(coalesce(after_message_id, 0), 0)
     and coalesce(settings.notifications_enabled, true)
     and (state.cleared_at is null or m.created_at > state.cleared_at)
@@ -329,157 +337,5 @@ revoke all on function public.list_message_notifications(bigint) from public,ano
 grant execute on function private.selam_notifications(bigint) to authenticated;
 grant execute on function public.list_message_notifications(bigint) to authenticated;
 
--- Preserve new per-account data when recovery replaces the anonymous device identity.
-create or replace function public.recover_profile(
-  phone_e164 text,
-  recovery_pin text
-)
-returns table (
-  success boolean,
-  result_message text,
-  username text,
-  display_name text,
-  phone_last4 text,
-  safety_code text
-)
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  current_user_id uuid := auth.uid();
-  old_user_id uuid;
-  clean_phone text := trim(phone_e164);
-  clean_pin text := trim(recovery_pin);
-  wanted_hash bytea;
-  stored_pin_hash text;
-  dummy_pin_hash text;
-  requester_attempts integer;
-  requester_window timestamptz;
-  target_attempts integer;
-  target_window timestamptz;
-  now_at timestamptz := clock_timestamp();
-begin
-  if current_user_id is null then raise exception 'Oturum gerekli'; end if;
-  if clean_phone !~ '^\+[1-9][0-9]{7,14}$' or clean_pin !~ '^[0-9]{6}$' then
-    return query select false, 'Numara veya PIN hatalı', null::text, null::text, null::text, null::text;
-    return;
-  end if;
 
-  if not exists (
-    select 1 from public.profiles p
-    where p.id = current_user_id and p.phone_hash is null
-  ) then
-    return query select false, 'Bu cihazda zaten aktif bir Selam hesabı var', null::text, null::text, null::text, null::text;
-    return;
-  end if;
-
-  if exists (select 1 from public.conversation_members m where m.user_id = current_user_id)
-     or exists (select 1 from public.messages m where m.sender_id = current_user_id)
-     or exists (select 1 from public.conversation_user_states s where s.user_id = current_user_id)
-     or exists (select 1 from public.user_settings s where s.user_id = current_user_id)
-     or exists (select 1 from public.status_updates s where s.user_id = current_user_id)
-     or exists (select 1 from public.communities c where c.owner_id = current_user_id)
-     or exists (select 1 from public.community_members m where m.user_id = current_user_id)
-     or exists (select 1 from public.call_events c where c.caller_id = current_user_id)
-     or exists (select 1 from public.conversations c where c.created_by = current_user_id) then
-    return query select false, 'Boş olmayan cihaz hesabına kurtarma yapılamaz', null::text, null::text, null::text, null::text;
-    return;
-  end if;
-
-  wanted_hash := private.phone_digest(clean_phone);
-
-  insert into private.account_recovery_target_limits(phone_hash)
-  values (wanted_hash)
-  on conflict (phone_hash) do nothing;
-
-  insert into private.account_recovery_attempts(requester_id, phone_hash)
-  values (current_user_id, wanted_hash)
-  on conflict (requester_id, phone_hash) do nothing;
-
-  select l.failed_attempts, l.window_started_at
-  into target_attempts, target_window
-  from private.account_recovery_target_limits l
-  where l.phone_hash = wanted_hash
-  for update;
-
-  select a.failed_attempts, a.window_started_at
-  into requester_attempts, requester_window
-  from private.account_recovery_attempts a
-  where a.requester_id = current_user_id and a.phone_hash = wanted_hash
-  for update;
-
-  if target_window < now_at - interval '1 hour' then
-    update private.account_recovery_target_limits
-    set failed_attempts = 0, window_started_at = now_at
-    where phone_hash = wanted_hash;
-    target_attempts := 0;
-  end if;
-
-  if requester_window < now_at - interval '15 minutes' then
-    update private.account_recovery_attempts
-    set failed_attempts = 0, window_started_at = now_at
-    where requester_id = current_user_id and phone_hash = wanted_hash;
-    requester_attempts := 0;
-  end if;
-
-  if requester_attempts >= 5 or target_attempts >= 25 then
-    return query select false, 'Çok fazla deneme yapıldı. Bir süre sonra yeniden deneyin', null::text, null::text, null::text, null::text;
-    return;
-  end if;
-
-  select p.id, p.recovery_pin_hash
-  into old_user_id, stored_pin_hash
-  from public.profiles p
-  where p.phone_hash = wanted_hash and p.id <> current_user_id;
-
-  select s.secret into dummy_pin_hash
-  from private.app_secrets s
-  where s.name = 'recovery_dummy_hash';
-
-  if old_user_id is null
-     or stored_pin_hash is null
-     or extensions.crypt(clean_pin, coalesce(stored_pin_hash, dummy_pin_hash))
-        <> coalesce(stored_pin_hash, dummy_pin_hash) then
-    update private.account_recovery_attempts
-    set failed_attempts = failed_attempts + 1
-    where requester_id = current_user_id and phone_hash = wanted_hash;
-    update private.account_recovery_target_limits
-    set failed_attempts = failed_attempts + 1
-    where phone_hash = wanted_hash;
-    return query select false, 'Numara veya PIN hatalı', null::text, null::text, null::text, null::text;
-    return;
-  end if;
-
-  update public.message_user_states set user_id=current_user_id where user_id=old_user_id;
-  update public.message_reactions set user_id=current_user_id where user_id=old_user_id;
-  update public.webrtc_call_history_hidden set user_id=current_user_id where user_id=old_user_id;
-  update public.webrtc_ice_candidates set user_id=current_user_id where user_id=old_user_id;
-  update public.webrtc_calls set caller_id=current_user_id where caller_id=old_user_id;
-  update public.webrtc_calls set callee_id=current_user_id where callee_id=old_user_id;
-  update public.messages set sender_id = current_user_id where sender_id = old_user_id;
-  update public.conversation_members set user_id = current_user_id where user_id = old_user_id;
-  update public.conversation_user_states set user_id = current_user_id where user_id = old_user_id;
-  update public.user_settings set user_id = current_user_id where user_id = old_user_id;
-  update public.status_updates set user_id = current_user_id where user_id = old_user_id;
-  update public.communities set owner_id = current_user_id where owner_id = old_user_id;
-  update public.community_members set user_id = current_user_id where user_id = old_user_id;
-  update public.call_events set caller_id = current_user_id where caller_id = old_user_id;
-  update public.conversations set created_by = current_user_id where created_by = old_user_id;
-  update storage.objects set owner_id = current_user_id::text where owner_id = old_user_id::text;
-
-  delete from public.profiles where id = current_user_id;
-  update public.profiles set id = current_user_id where id = old_user_id;
-  delete from auth.users where id = old_user_id;
-
-  delete from private.account_recovery_attempts where requester_id = current_user_id;
-  delete from private.account_recovery_target_limits where phone_hash = wanted_hash;
-
-  return query
-  select true, 'Hesabınız bu cihaza geri yüklendi', p.username,
-         p.display_name, p.phone_last4, p.safety_code
-  from public.profiles p
-  where p.id = current_user_id;
-end;
-$$;
-
+-- No account recovery function or existing account ownership is changed by this migration.
