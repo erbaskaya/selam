@@ -69,12 +69,12 @@ public final class CallActivity extends Activity {
     private String contactName;
     private boolean incoming;
     private boolean accepted;
-    private boolean remoteDescriptionSet;
-    private boolean finished;
+    private volatile boolean remoteDescriptionSet;
+    private volatile boolean finished;
     private boolean muted;
     private boolean speaker;
-    private boolean localOfferReady;
-    private boolean localAnswerReady;
+    private volatile boolean localOfferReady;
+    private volatile boolean localAnswerReady;
     private boolean offerPublished;
     private boolean answerPublished;
     private long lastIceId;
@@ -300,8 +300,12 @@ public final class CallActivity extends Activity {
         peerConnection.setRemoteDescription(new SdpAdapter() {
             @Override public void onSetSuccess() {
                 remoteDescriptionSet = true;
-                for (IceCandidate candidate : pendingRemoteIce) peerConnection.addIceCandidate(candidate);
-                pendingRemoteIce.clear();
+                List<IceCandidate> queued;
+                synchronized (pendingRemoteIce) {
+                    queued = new ArrayList<>(pendingRemoteIce);
+                    pendingRemoteIce.clear();
+                }
+                for (IceCandidate candidate : queued) peerConnection.addIceCandidate(candidate);
                 after.run();
             }
         }, description);
@@ -344,8 +348,14 @@ public final class CallActivity extends Activity {
                             lastIceId = Math.max(lastIceId, item.id);
                             IceCandidate candidate = new IceCandidate(item.sdpMid,
                                     item.sdpMLineIndex, item.candidate);
-                            if (remoteDescriptionSet) peerConnection.addIceCandidate(candidate);
-                            else pendingRemoteIce.add(candidate);
+                            if (remoteDescriptionSet) {
+                                peerConnection.addIceCandidate(candidate);
+                            } else {
+                                synchronized (pendingRemoteIce) {
+                                    if (remoteDescriptionSet) peerConnection.addIceCandidate(candidate);
+                                    else pendingRemoteIce.add(candidate);
+                                }
+                            }
                         }
                         handler.postDelayed(pollIce, 900L);
                     }

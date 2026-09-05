@@ -2,7 +2,7 @@
 
 Selam, bağımsız çalışan mavi temalı Android ve iPhone mesajlaşma uygulamasıdır. WebView kullanmaz ve ChatGPT oturumu istemez.
 
-## Sürüm 1.5.3 özellikleri
+## Sürüm 1.5.4 özellikleri
 
 - E-posta, şifre ve ücretli SMS olmadan cihaz hesabı
 - Ad, telefon numarası ve 6 haneli kurtarma PIN'iyle kurulum
