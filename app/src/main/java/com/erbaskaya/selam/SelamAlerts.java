@@ -118,6 +118,9 @@ final class SelamAlerts {
     }
 
     private void postIncomingCall(SupabaseClient.IncomingCall call) {
+        if (activity instanceof MainActivity && activity.hasWindowFocus()) {
+            activity.runOnUiThread(() -> ((MainActivity) activity).showIncomingCall(call));
+        }
         if (!canNotify()) {
             playDefaultSound(RingtoneManager.TYPE_RINGTONE);
             return;

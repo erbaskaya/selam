@@ -93,6 +93,7 @@ public class MainActivity extends Activity {
     private boolean pendingCameraChatCanCall;
     private String pendingCallChatId;
     private String pendingCallName;
+    private String visibleIncomingCallId;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -1214,6 +1215,31 @@ public class MainActivity extends Activity {
                 == PackageManager.PERMISSION_GRANTED) launchAudioCall();
         else requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},
                 REQUEST_AUDIO_PERMISSION);
+    }
+
+    void showIncomingCall(SupabaseClient.IncomingCall call) {
+        if (isFinishing() || isDestroyed() || call == null
+                || call.id.equals(visibleIncomingCallId)) return;
+        visibleIncomingCallId = call.id;
+        new AlertDialog.Builder(this)
+                .setTitle(call.callerName)
+                .setMessage("Gelen Selam internet araması")
+                .setCancelable(false)
+                .setNegativeButton("Reddet", (dialog, which) -> {
+                    visibleIncomingCallId = null;
+                    api.declineAudioCall(call.id, uiCallback(done -> { }));
+                })
+                .setPositiveButton("Yanıtla", (dialog, which) -> {
+                    visibleIncomingCallId = null;
+                    Intent answer = new Intent(this, CallActivity.class)
+                            .putExtra(CallActivity.EXTRA_CALL_ID, call.id)
+                            .putExtra(CallActivity.EXTRA_CHAT_ID, call.conversationId)
+                            .putExtra(CallActivity.EXTRA_NAME, call.callerName)
+                            .putExtra(CallActivity.EXTRA_INCOMING, true);
+                    startActivity(answer);
+                })
+                .setOnDismissListener(dialog -> visibleIncomingCallId = null)
+                .show();
     }
 
     private void launchAudioCall() {

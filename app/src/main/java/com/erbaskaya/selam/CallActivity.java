@@ -64,7 +64,7 @@ public final class CallActivity extends Activity {
     private Button declineButton;
     private Button muteButton;
     private Button speakerButton;
-    private String callId;
+    private volatile String callId;
     private String chatId;
     private String contactName;
     private boolean incoming;
@@ -73,6 +73,10 @@ public final class CallActivity extends Activity {
     private boolean finished;
     private boolean muted;
     private boolean speaker;
+    private boolean localOfferReady;
+    private boolean localAnswerReady;
+    private boolean offerPublished;
+    private boolean answerPublished;
     private long lastIceId;
 
     @Override
@@ -210,18 +214,35 @@ public final class CallActivity extends Activity {
             @Override public void onCreateSuccess(SessionDescription offer) {
                 peerConnection.setLocalDescription(new SdpAdapter() {
                     @Override public void onSetSuccess() {
-                        api.startAudioCall(chatId, offer.description, new SupabaseClient.Callback<String>() {
-                            @Override public void onSuccess(String id) {
-                                callId = id;
-                                flushLocalIce();
-                                schedulePolling();
-                            }
-                            @Override public void onError(String message) { runOnUiThread(() -> fail(message)); }
-                        });
+                        localOfferReady = true;
+                        status("Bağlantı hazırlanıyor…");
+                        // ICE adaylarını SDP'ye de ekleyebilmek için kısa süre topluyoruz.
+                        // COMPLETE olayı gelmezse bu zamanlayıcı aramayı yine başlatır.
+                        handler.postDelayed(() -> publishOutgoingOffer(true), 3_500L);
                     }
                 }, offer);
             }
         }, constraints);
+    }
+
+    private synchronized void publishOutgoingOffer(boolean force) {
+        if (finished || offerPublished || !localOfferReady || peerConnection == null) return;
+        if (!force && peerConnection.iceGatheringState()
+                != PeerConnection.IceGatheringState.COMPLETE) return;
+        SessionDescription local = peerConnection.getLocalDescription();
+        if (local == null || local.description == null || local.description.isEmpty()) return;
+        offerPublished = true;
+        api.startAudioCall(chatId, local.description, new SupabaseClient.Callback<String>() {
+            @Override public void onSuccess(String id) {
+                callId = id;
+                flushLocalIce();
+                schedulePolling();
+                status("Aranıyor…");
+            }
+            @Override public void onError(String message) {
+                runOnUiThread(() -> fail(message));
+            }
+        });
     }
 
     private void acceptIncoming() {
@@ -244,17 +265,8 @@ public final class CallActivity extends Activity {
                         @Override public void onCreateSuccess(SessionDescription answer) {
                             peerConnection.setLocalDescription(new SdpAdapter() {
                                 @Override public void onSetSuccess() {
-                                    api.answerAudioCall(callId, answer.description,
-                                            new SupabaseClient.Callback<Boolean>() {
-                                                @Override public void onSuccess(Boolean value) {
-                                                    flushLocalIce();
-                                                    schedulePolling();
-                                                    runOnUiThread(() -> status("Bağlanıyor…"));
-                                                }
-                                                @Override public void onError(String message) {
-                                                    runOnUiThread(() -> fail(message));
-                                                }
-                                            });
+                                    localAnswerReady = true;
+                                    handler.postDelayed(() -> publishIncomingAnswer(true), 3_500L);
                                 }
                             }, answer);
                         }
@@ -262,6 +274,25 @@ public final class CallActivity extends Activity {
                 });
             }
             @Override public void onError(String message) { runOnUiThread(() -> fail(message)); }
+        });
+    }
+
+    private synchronized void publishIncomingAnswer(boolean force) {
+        if (finished || answerPublished || !localAnswerReady || peerConnection == null) return;
+        if (!force && peerConnection.iceGatheringState()
+                != PeerConnection.IceGatheringState.COMPLETE) return;
+        SessionDescription local = peerConnection.getLocalDescription();
+        if (local == null || local.description == null || local.description.isEmpty()) return;
+        answerPublished = true;
+        api.answerAudioCall(callId, local.description, new SupabaseClient.Callback<Boolean>() {
+            @Override public void onSuccess(Boolean value) {
+                flushLocalIce();
+                schedulePolling();
+                status("Bağlanıyor…");
+            }
+            @Override public void onError(String message) {
+                runOnUiThread(() -> fail(message));
+            }
         });
     }
 
@@ -326,19 +357,30 @@ public final class CallActivity extends Activity {
 
     private void sendLocalIce(IceCandidate candidate) {
         if (callId == null) {
-            pendingLocalIce.add(candidate);
+            synchronized (pendingLocalIce) {
+                pendingLocalIce.add(candidate);
+            }
             return;
         }
         api.addIceCandidate(callId, candidate.sdp, candidate.sdpMid, candidate.sdpMLineIndex,
                 new SupabaseClient.Callback<Boolean>() {
                     @Override public void onSuccess(Boolean value) { }
-                    @Override public void onError(String message) { }
+                    @Override public void onError(String message) {
+                        synchronized (pendingLocalIce) {
+                            pendingLocalIce.add(candidate);
+                        }
+                        handler.postDelayed(CallActivity.this::flushLocalIce, 1_500L);
+                    }
                 });
     }
 
     private void flushLocalIce() {
-        List<IceCandidate> copy = new ArrayList<>(pendingLocalIce);
-        pendingLocalIce.clear();
+        if (finished || callId == null) return;
+        List<IceCandidate> copy;
+        synchronized (pendingLocalIce) {
+            copy = new ArrayList<>(pendingLocalIce);
+            pendingLocalIce.clear();
+        }
         for (IceCandidate candidate : copy) sendLocalIce(candidate);
     }
 
@@ -415,7 +457,12 @@ public final class CallActivity extends Activity {
             else if (state == PeerConnection.IceConnectionState.FAILED) fail("Bağlantı kurulamadı.");
         }
         @Override public void onIceConnectionReceivingChange(boolean receiving) { }
-        @Override public void onIceGatheringChange(PeerConnection.IceGatheringState state) { }
+        @Override public void onIceGatheringChange(PeerConnection.IceGatheringState state) {
+            if (state == PeerConnection.IceGatheringState.COMPLETE) {
+                if (incoming) publishIncomingAnswer(false);
+                else publishOutgoingOffer(false);
+            }
+        }
         @Override public void onIceCandidate(IceCandidate candidate) { sendLocalIce(candidate); }
         @Override public void onIceCandidatesRemoved(IceCandidate[] candidates) { }
         @Override public void onAddStream(MediaStream stream) { }
