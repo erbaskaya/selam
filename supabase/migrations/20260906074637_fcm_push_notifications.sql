@@ -86,7 +86,7 @@ begin
  where cm.user_id=j.user_id and cm.conversation_id=m.conversation_id and m.deleted_at is null
  and coalesce(us.notifications_enabled,true) and m.id>coalesce(st.last_read_id,0)
  and (st.muted_until is null or st.muted_until<=now()) and (st.cleared_at is null or m.created_at>st.cleared_at)
- and not exists(select 1 from public.message_user_states ms join public.profiles p on p.account_code=ms.account_code
+ and not exists(select 1 from public.message_user_states ms join public.profiles p on p.safety_code=ms.account_code
  where p.id=j.user_id and ms.message_id=m.id and ms.hidden)) into allowed;
  if not allowed then update private.push_jobs set done=true where id=j.id;return null;end if;
  return jsonb_build_object('id',j.id,'lease_id',lease,'user_id',j.user_id,'message_id',m.id::text,'chat_id',m.conversation_id,
