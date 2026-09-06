@@ -49,6 +49,8 @@ public class ChatActivity extends Activity {
     private File voiceFile;
     private AlertDialog recordDialog,playDialog;
     private final Runnable poll=()->refresh(false);
+    private boolean refreshAgain;
+    private final SyncEvents.Listener deliveryListener=kind->{if(active&&!"call".equals(kind))refresh(false);};
     private final Runnable recordTimeout=()->stopRecording(true);
     private final Runnable presence=new Runnable(){public void run(){if(active){rpc("selam_presence",SupabaseClient.json(),s->{});handler.postDelayed(this,30000);}}};
 
@@ -64,8 +66,8 @@ public class ChatActivity extends Activity {
         drafts=getSharedPreferences("selam_drafts_"+api.userId(),MODE_PRIVATE);
         build();
     }
-    @Override public void onResume(){super.onResume();if(api==null||chatId==null)return;active=true;foregroundChat=chatId;foreground=new java.lang.ref.WeakReference<>(this);olderMode=false;build();refresh(true);handler.post(presence);}
-    @Override public void onPause(){active=false;foregroundChat=null;foreground.clear();handler.removeCallbacks(poll);handler.removeCallbacks(presence);saveDraft();super.onPause();}
+    @Override public void onResume(){super.onResume();if(api==null||chatId==null)return;active=true;foregroundChat=chatId;foreground=new java.lang.ref.WeakReference<>(this);SyncEvents.add(deliveryListener);SelamSyncService.start(this);olderMode=false;build();refresh(true);handler.post(presence);}
+    @Override public void onPause(){active=false;foregroundChat=null;foreground.clear();SyncEvents.remove(deliveryListener);handler.removeCallbacks(poll);handler.removeCallbacks(presence);saveDraft();super.onPause();}
     @Override public void onStop(){if(recorder!=null)stopRecording(false);stopPlayer();super.onStop();}
     @Override public void onDestroy(){handler.removeCallbacksAndMessages(null);stopPlayer();if(api!=null)api.close();super.onDestroy();}
     private String draftKey(){return "draft:"+chatId;}
@@ -105,7 +107,7 @@ public class ChatActivity extends Activity {
     private void updateReply(){if(reply==null)return;reply.setVisibility(replying==null?View.GONE:View.VISIBLE);if(replying!=null)reply.setText("Yanıt: "+replying.body+"   ✕");}
     private void refresh(boolean immediate){
         handler.removeCallbacks(poll);if(!active)return;
-        if(fetching){handler.postDelayed(poll,1000);return;}if(olderMode&&!immediate){handler.postDelayed(poll,3000);return;}
+        if(fetching){refreshAgain=true;return;}if(olderMode&&!immediate){handler.postDelayed(poll,3000);return;}
         fetching=true;int generation=++requestGeneration;
         api.messages(chatId,query,starred,null,cb(items->{fetching=false;if(generation!=requestGeneration)return;
             StringBuilder fp=new StringBuilder();for(SupabaseClient.Message m:items)fp.append(m.fingerprint);
@@ -113,7 +115,7 @@ public class ChatActivity extends Activity {
             int first=list.getFirstVisiblePosition(),offset=list.getChildCount()>0?list.getChildAt(0).getTop():0;
             if(!fp.toString().equals(fingerprint)||immediate){messages=items;fingerprint=fp.toString();list.setAdapter(new MessagesAdapter());if(bottom||immediate)list.setSelection(items.size()-1);else list.setSelectionFromTop(first,offset);}
             older.setEnabled(items.size()==100);historyControls.setVisibility(items.size()==100||starred||!query.isEmpty()?View.VISIBLE:View.GONE);status.setText(starred?"Yıldızlı mesajlar":!query.isEmpty()?"Arama: "+query:items.isEmpty()?"İlk mesajı gönderin":"");status.setVisibility(status.getText().length()==0?View.GONE:View.VISIBLE);
-            list.post(this::markRead);handler.postDelayed(poll,2500);
+            list.post(this::markRead);if(active)handler.postDelayed(poll,refreshAgain?0:1500);refreshAgain=false;
         },error->{fetching=false;status.setVisibility(View.VISIBLE);status.setText(error+" · Yeniden denemek için dokunun");handler.postDelayed(poll,5000);}));
     }
     private void markRead(){if(!active||olderMode||starred||!query.isEmpty()||messages.isEmpty()||list.getLastVisiblePosition()<messages.size()-1)return;long id=messages.get(messages.size()-1).id;if(id<=markedRead)return;markedRead=id;api.rpc("selam_mark_read",SupabaseClient.json("p_chat_id",chatId,"p_message_id",id),cb(s->{},s->markedRead=0));}
@@ -155,7 +157,7 @@ public class ChatActivity extends Activity {
             .setNegativeButton("Reddet",(d,w)->api.declineAudioCall(call.id,cb(done->{})))
             .setPositiveButton("Yanıtla",(d,w)->startActivity(new Intent(this,CallActivity.class)
                 .putExtra(CallActivity.EXTRA_CALL_ID,call.id).putExtra(CallActivity.EXTRA_CHAT_ID,call.conversationId)
-                .putExtra(CallActivity.EXTRA_NAME,call.callerName).putExtra(CallActivity.EXTRA_INCOMING,true))).show();
+                .putExtra(CallActivity.EXTRA_NAME,call.callerName).putExtra(CallActivity.EXTRA_INCOMING,true).putExtra(CallActivity.EXTRA_AUTO_ANSWER,true))).show();
     }
     private void play(String source,String title){stopPlayer();try{player=new MediaPlayer();MediaPlayer current=player;current.setDataSource(source);LinearLayout box=column();box.setPadding(dp(20),dp(12),dp(20),dp(12));TextView state=text("Yükleniyor…",16,look.text(),false);box.addView(state);Button speed=action("Hız: 1×","Oynatma hızı",()->{try{float rate=current.getPlaybackParams().getSpeed();float next=rate<1.4f?1.5f:rate<1.9f?2f:1f;current.setPlaybackParams(current.getPlaybackParams().setSpeed(next));state.setText("Oynatılıyor • "+next+"×");}catch(Exception ignored){}});speed.setTextSize(16);box.addView(speed);playDialog=new AlertDialog.Builder(this).setTitle(title).setView(box).setPositiveButton("Kapat",(d,w)->stopPlayer()).setOnCancelListener(d->stopPlayer()).show();current.setOnPreparedListener(p->{if(player==p){p.start();state.setText("Oynatılıyor");}});current.setOnCompletionListener(p->state.setText("Tamamlandı"));current.setOnErrorListener((p,a,b)->{toast("Ses oynatılamadı");stopPlayer();return true;});current.prepareAsync();}catch(Exception e){stopPlayer();toast("Ses açılamadı");}}
     private void stopPlayer(){if(player!=null){player.release();player=null;}if(playDialog!=null){playDialog.dismiss();playDialog=null;}}

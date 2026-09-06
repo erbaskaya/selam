@@ -60,6 +60,8 @@ import java.util.Locale;
 import java.util.Map;
 
 public class MainActivity extends Activity {
+    static java.lang.ref.WeakReference<MainActivity> foreground=new java.lang.ref.WeakReference<>(null);
+    private final SyncEvents.Listener deliveryListener=kind->{if(resumed&&"home".equals(screen))refreshHome();};
     private int BLUE = Color.rgb(25, 105, 230);
     private Appearance appearance;
     private int SURFACE = Color.WHITE;
@@ -88,7 +90,6 @@ public class MainActivity extends Activity {
     private final Runnable pollMessages = this::refreshMessages;
     private SupabaseClient api;
     private UpdateManager updateManager;
-    private SelamAlerts alerts;
     private SupabaseClient.Profile myProfile;
     private FrameLayout root;
     private ProgressBar progress;
@@ -114,7 +115,6 @@ public class MainActivity extends Activity {
         getWindow().setNavigationBarColor(NAVY);
         api = new SupabaseClient(this);
         updateManager = new UpdateManager(this);
-        alerts = new SelamAlerts(this, api);
 
         root = new FrameLayout(this);
         // Android 15+ sistem çubuklarını içerik üstüne bindirir. Kök görünüm
@@ -146,13 +146,14 @@ public class MainActivity extends Activity {
         appliedAppearance=appearance.exportGlobal().toString()+appearance.dark();
     }
     @Override protected void onResume() {
-        super.onResume();resumed=true;
+        super.onResume();resumed=true;foreground=new java.lang.ref.WeakReference<>(this);SyncEvents.add(deliveryListener);
+        if(myProfile!=null&&myProfile.ready)SelamSyncService.start(this);
         if (updateManager != null) updateManager.resumeInstallIfReady();
         if(appearance!=null && !appliedAppearance.equals(appearance.exportGlobal().toString()+appearance.dark())){recreate();return;}
         if("external-chat".equals(screen))showHome();
         else if("home".equals(screen))refreshHome();
     }
-    @Override protected void onPause(){resumed=false;handler.removeCallbacks(homePoll);super.onPause();}
+    @Override protected void onPause(){resumed=false;foreground.clear();SyncEvents.remove(deliveryListener);handler.removeCallbacks(homePoll);super.onPause();}
 
     @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);consumeNotification();}
     private void consumeNotification(){
@@ -178,7 +179,7 @@ public class MainActivity extends Activity {
             setBusy(false);
             if (profile.ready) {
                 requestNotificationPermission();
-                alerts.start();
+                SelamSyncService.start(this);
                 showHome();
                 consumeNotification();
                 String syncKey="synced:"+api.userId();
@@ -809,6 +810,9 @@ public class MainActivity extends Activity {
             CheckBox callNotifications = settingCheck("Arama bildirimleri", settings.callNotifications);
             form.addView(receipts); form.addView(lastSeen); form.addView(notifications);
             form.addView(callNotifications);
+            CheckBox background=settingCheck("Arka planda mesaj bağlantısını sürdür",SelamSyncService.enabled(this));
+            background.setOnCheckedChangeListener((button,checked)->SelamSyncService.setEnabled(this,checked));
+            form.addView(background);
             TextView privacy = label("Gizlilik notu: telefon numaran açık olarak saklanmaz; kişiler eşleştirilirken tek yönlü özeti kullanılır.", 13, MUTED, false);
             privacy.setPadding(dp(12), dp(12), dp(12), dp(12));
             privacy.setBackground(rounded(appearance.tintSurface(), BORDER, 12));
@@ -1278,6 +1282,7 @@ public class MainActivity extends Activity {
                             .putExtra(CallActivity.EXTRA_CHAT_ID, call.conversationId)
                             .putExtra(CallActivity.EXTRA_NAME, call.callerName)
                             .putExtra(CallActivity.EXTRA_INCOMING, true);
+                    answer.putExtra(CallActivity.EXTRA_AUTO_ANSWER,true);
                     startActivity(answer);
                 })
                 .setOnDismissListener(dialog -> visibleIncomingCallId = null)
@@ -1651,7 +1656,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         stopPolling();
-        if (alerts != null) alerts.close();
+        SyncEvents.remove(deliveryListener);
         if (updateManager != null) updateManager.close();
         api.close();
         super.onDestroy();

@@ -20,6 +20,14 @@ insert into public.conversation_members(conversation_id,user_id,role) values
 set local role authenticated;
 select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000001',true);
 select public.selam_send('10000000-0000-0000-0000-000000000001','Original') as msg \gset
+select public.test_assert((select count(*) from public.selam_delivery_events)=1,'Realtime RLS exposes only own delivery cursor');
+select public.test_assert(public.test_denied('update public.selam_delivery_events set version=0'),'clients cannot forge delivery events');
+select public.test_assert(public.test_denied('select private.selam_wake_devices()'),'clients cannot invoke delivery trigger');
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000002',true);
+select public.test_assert(exists(select 1 from public.selam_delivery_events where kind='message'),'recipient receives message wakeup');
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000003',true);
+select public.test_assert(not exists(select 1 from public.selam_delivery_events),'nonmember sees no delivery events');
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000001',true);
 select public.selam_message_action(:msg,'star');
 select public.selam_message_action(:msg,'react','👍');
 select public.selam_message_action(:msg,'edit','Edited');
@@ -94,6 +102,15 @@ reset role;
 select public.test_assert(exists(select 1 from public.profiles where id='00000000-0000-0000-0000-000000000001' and recovery_pin_hash=extensions.crypt('739281',recovery_pin_hash)),'failed entry preserves original identity and PIN');
 set local role authenticated;
 select public.test_assert((select success from public.recover_profile('+12025550123','739281')),'PIN recovery succeeds in isolated database');
+select public.test_assert(exists(select 1 from public.selam_delivery_events where user_id=auth.uid()),'delivery cursor follows authorized account recovery');
+select public.start_audio_call('10000000-0000-0000-0000-000000000001','isolated-test-offer-at-least-20-characters') as audio_call \gset
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000002',true);
+select public.test_assert(exists(select 1 from public.selam_delivery_events where kind='call'),'callee receives call wakeup');
+select public.test_assert((select count(*) from public.list_incoming_audio_calls())=1,'call rings for recipient');
+select public.answer_audio_call(:'audio_call','isolated-test-answer-at-least-20-characters');
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000004',true);
+select public.test_assert((select call_state from public.get_audio_call_state(:'audio_call'))='accepted','caller receives accepted call state');
+select public.end_audio_call(:'audio_call');
 select public.test_assert(public.selam_preferences()->>'mode'='dark','appearance survives account recovery');
 select public.test_assert(jsonb_array_length(public.selam_messages('10000000-0000-0000-0000-000000000001','',true))=1,'stars survive account recovery');
 select public.test_assert((public.selam_messages('10000000-0000-0000-0000-000000000001','Reply')->0->>'reactions')='❤️ 1','reactions survive account recovery');

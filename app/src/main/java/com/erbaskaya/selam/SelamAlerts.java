@@ -25,9 +25,9 @@ import java.util.Set;
 final class SelamAlerts {
     private static final String MESSAGE_CHANNEL = "selam_messages";
     private static final String CALL_CHANNEL = "selam_calls";
-    private static final long POLL_MS = 3_000L;
+    private static final long POLL_MS = 15_000L;
 
-    private final Activity activity;
+    private final Context activity;
     private final SupabaseClient api;
     private final NotificationManager notifications;
     private final SharedPreferences preferences;
@@ -36,13 +36,20 @@ final class SelamAlerts {
     private final Runnable pollMessages = this::checkMessages;
     private final Runnable pollCalls = this::checkCalls;
     private boolean running;
+    private boolean messagesInFlight,callsInFlight,messagesPending,callsPending;
 
-    SelamAlerts(Activity activity, SupabaseClient api) {
-        this.activity = activity;
+    SelamAlerts(Context activity, SupabaseClient api) {
+        this.activity = activity.getApplicationContext();
         this.api = api;
         notifications = (NotificationManager) activity.getSystemService(Context.NOTIFICATION_SERVICE);
-        preferences = activity.getSharedPreferences("selam_alerts", Context.MODE_PRIVATE);
+        preferences = activity.getSharedPreferences("selam_alerts_"+api.userId(), Context.MODE_PRIVATE);
         createChannels();
+    }
+
+    void refresh(String kind) {
+        if(!running)return;
+        if(!"call".equals(kind)){handler.removeCallbacks(pollMessages);checkMessages();}
+        if(!"message".equals(kind)){handler.removeCallbacks(pollCalls);checkCalls();}
     }
 
     void start() {
@@ -54,46 +61,60 @@ final class SelamAlerts {
 
     private void checkMessages() {
         if (!running || !api.hasSession()) return;
+        if(messagesInFlight){messagesPending=true;return;}
+        messagesInFlight=true;
         long after = preferences.getLong("last_message_id", 0L);
-        boolean initialized = preferences.getBoolean("messages_initialized", false);
         api.listMessageNotifications(after, new SupabaseClient.Callback<List<SupabaseClient.MessageNotification>>() {
             @Override public void onSuccess(List<SupabaseClient.MessageNotification> items) {
+                handler.post(()->{
+                messagesInFlight=false;if(!running)return;
                 long newest = after;
                 for (SupabaseClient.MessageNotification item : items) newest = Math.max(newest, item.id);
-                if (!initialized) {
-                    preferences.edit().putBoolean("messages_initialized", true)
-                            .putLong("last_message_id", newest).apply();
-                } else {
-                    for (SupabaseClient.MessageNotification item : items) postMessage(item);
-                    if (newest > after) preferences.edit().putLong("last_message_id", newest).apply();
-                }
+                java.util.Map<String,SupabaseClient.MessageNotification> latest=new java.util.LinkedHashMap<>();
+                for(SupabaseClient.MessageNotification item:items)latest.put(item.conversationId,item);
+                for(SupabaseClient.MessageNotification item:latest.values())postMessage(item);
+                if(newest>after)preferences.edit().putLong("last_message_id",newest).apply();
+                if(items.size()==50)messagesPending=true;
                 scheduleMessages();
+                });
             }
-            @Override public void onError(String message) { scheduleMessages(); }
+            @Override public void onError(String message) { handler.post(()->{messagesInFlight=false;messagesPending=false;scheduleMessages();}); }
         });
     }
 
     private void checkCalls() {
         if (!running || !api.hasSession()) return;
+        if(callsInFlight){callsPending=true;return;}
+        callsInFlight=true;
         api.listIncomingCalls(new SupabaseClient.Callback<List<SupabaseClient.IncomingCall>>() {
             @Override public void onSuccess(List<SupabaseClient.IncomingCall> calls) {
+                handler.post(()->{
+                callsInFlight=false;if(!running)return;
+                Set<String> active=new HashSet<>();
                 for (SupabaseClient.IncomingCall call : calls) {
+                    active.add(call.id);
                     if (announcedCalls.add(call.id)) postIncomingCall(call);
                 }
+                for(String previous:new HashSet<>(announcedCalls))if(!active.contains(previous)){
+                    notifications.cancel(previous.hashCode());announcedCalls.remove(previous);
+                }
                 scheduleCalls();
+                });
             }
-            @Override public void onError(String message) { scheduleCalls(); }
+            @Override public void onError(String message) { handler.post(()->{callsInFlight=false;callsPending=false;scheduleCalls();}); }
         });
     }
 
     private void scheduleMessages() {
         handler.removeCallbacks(pollMessages);
-        if (running) handler.postDelayed(pollMessages, POLL_MS);
+        if (running) handler.postDelayed(pollMessages, messagesPending?0:POLL_MS);
+        messagesPending=false;
     }
 
     private void scheduleCalls() {
         handler.removeCallbacks(pollCalls);
-        if (running) handler.postDelayed(pollCalls, POLL_MS);
+        if (running) handler.postDelayed(pollCalls, callsPending?0:POLL_MS);
+        callsPending=false;
     }
 
     private void postMessage(SupabaseClient.MessageNotification item) {
@@ -121,14 +142,12 @@ final class SelamAlerts {
                 .setAutoCancel(true)
                 .setCategory(Notification.CATEGORY_MESSAGE)
                 .build();
-        notifications.notify((int) (item.id & 0x7fffffff), notification);
+        notifications.notify(item.conversationId.hashCode(), notification);
     }
 
     private void postIncomingCall(SupabaseClient.IncomingCall call) {
-        activity.runOnUiThread(()->{ChatActivity chat=ChatActivity.foreground.get();if(chat!=null)chat.incomingCall(call);});
-        if (activity instanceof MainActivity && activity.hasWindowFocus()) {
-            activity.runOnUiThread(() -> ((MainActivity) activity).showIncomingCall(call));
-        }
+        ChatActivity chat=ChatActivity.foreground.get();MainActivity home=MainActivity.foreground.get();
+        if(chat!=null)chat.incomingCall(call);else if(home!=null)home.showIncomingCall(call);
         if (!canNotify()) {
             playDefaultSound(RingtoneManager.TYPE_RINGTONE);
             return;

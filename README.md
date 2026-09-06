@@ -2,6 +2,17 @@
 
 Selam, bağımsız çalışan mavi temalı Android mesajlaşma uygulamasıdır. iPhone kaynakları korunuyor; iPhone geliştirmesi şimdilik beklemede. WebView kullanmaz ve ChatGPT oturumu istemez.
 
+## Sürüm 1.6.2 yenilikleri
+
+- Mesaj ve arama değişikliklerinde Realtime üzerinden anlık yenileme; bağlantı kesilince yeniden bağlanma ve kaçırılan verileri RPC ile alma
+- Ana ekran kapansa da çalışan, Android bildiriminden veya Ayarlar'dan durdurulabilen mesaj bağlantısı servisi
+- İlk açılışta gelen okunmamış mesajların bildirimi; eski arama bildirimlerinin temizlenmesi
+- WebRTC için eksik ağ durumu izni; bağlantı hatasının ekranda kalması; Yanıtla'ya tek dokunuşla kabul
+- Ses bağlantısında 3,5 saniyelik sabit hazırlık beklemesi kaldırıldı; ICE adayları hazır oldukça gönderilir
+- Aynı anda süresi dolan oturum isteklerinde tek token yenilemesi; geçici ağ hatasında oturum silinmez
+
+Her iki telefonda da yeni sürümü kurun ve Android bildirim/mikrofon izinlerini verin. Arka plan servisi açıkken Android'de “Selam mesajları dinliyor” bildirimi görünür. Telefonun zorla durdurması, pil kısıtlamaları veya bağlantı kesilmesi teslimatı geciktirebilir; FCM push henüz bağlı değildir. TURN sunucusu henüz yapılandırılmadığından bazı mobil ağlar/VPN'ler arasında arama bağlantısı kurulamayabilir. Bu sürümün emülatör testi gerçek native WebRTC ile iki yerel ses eşini bağlar; farklı fiziksel telefonlar ve operatörler arasındaki aramayı doğrulamaz.
+
 ## Sürüm 1.6.1 yenilikleri
 
 - Kayıt ve geri yükleme için tek **Devam et** düğmesi: kayıtlı numarada mevcut PIN doğrulanır; yeni numarada hesap oluşturulur

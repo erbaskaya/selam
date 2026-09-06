@@ -299,6 +299,7 @@ class SupabaseClient {
     private static final String ACCESS_TOKEN = "access_token";
     private static final String REFRESH_TOKEN = "refresh_token";
     private static final String USER_ID = "user_id";
+    private static final Object SESSION_LOCK = new Object();
 
     private final String baseUrl = BuildConfig.SUPABASE_URL;
     private final String publishableKey = BuildConfig.SUPABASE_ANON_KEY;
@@ -1043,6 +1044,19 @@ class SupabaseClient {
         return preferences.getString(ACCESS_TOKEN, "");
     }
 
+    String sessionAccessToken() { return accessToken(); }
+
+    void realtimeToken(Callback<String> callback) {
+        // A normal authorized read refreshes expired tokens before opening the socket.
+        getMyProfile(new Callback<Profile>() {
+            public void onSuccess(Profile profile) {
+                if(profile.ready) callback.onSuccess(accessToken());
+                else callback.onError("Hesabınızı tamamlayın.");
+            }
+            public void onError(String message) { callback.onError(message); }
+        });
+    }
+
     private String refreshToken() {
         return preferences.getString(REFRESH_TOKEN, "");
     }
@@ -1084,30 +1098,33 @@ class SupabaseClient {
 
     private Response authorizedRequest(String method, String path, JSONObject payload)
             throws IOException, JSONException {
-        Response response = request(method, path, accessToken(), payload);
+        String usedToken=accessToken();
+        Response response = request(method, path, usedToken, payload);
         if (response.code != 401 || refreshToken().isEmpty()) return response;
-
-        JSONObject refreshPayload = new JSONObject().put("refresh_token", refreshToken());
-        Response refreshed = request("POST", "/auth/v1/token?grant_type=refresh_token", null, refreshPayload);
-        if (!refreshed.ok()) {
-            clearSession();
-            return response;
+        synchronized(SESSION_LOCK) {
+            if(usedToken.equals(accessToken())) {
+                JSONObject refreshPayload = new JSONObject().put("refresh_token", refreshToken());
+                Response refreshed = request("POST", "/auth/v1/token?grant_type=refresh_token", null, refreshPayload);
+                if (!refreshed.ok()) return response; // A temporary outage must not erase the account session.
+                saveSession(new JSONObject(refreshed.body));
+            }
         }
-        saveSession(new JSONObject(refreshed.body));
         return request(method, path, accessToken(), payload);
     }
 
     private Response authorizedBinaryRequest(String method, String path, String mimeType, byte[] bytes)
             throws IOException, JSONException {
-        Response response = binaryRequest(method, path, accessToken(), mimeType, bytes);
+        String usedToken=accessToken();
+        Response response = binaryRequest(method, path, usedToken, mimeType, bytes);
         if (response.code != 401 || refreshToken().isEmpty()) return response;
-        JSONObject refreshPayload = new JSONObject().put("refresh_token", refreshToken());
-        Response refreshed = request("POST", "/auth/v1/token?grant_type=refresh_token", null, refreshPayload);
-        if (!refreshed.ok()) {
-            clearSession();
-            return response;
+        synchronized(SESSION_LOCK) {
+            if(usedToken.equals(accessToken())) {
+                JSONObject refreshPayload = new JSONObject().put("refresh_token", refreshToken());
+                Response refreshed = request("POST", "/auth/v1/token?grant_type=refresh_token", null, refreshPayload);
+                if (!refreshed.ok()) return response;
+                saveSession(new JSONObject(refreshed.body));
+            }
         }
-        saveSession(new JSONObject(refreshed.body));
         return binaryRequest(method, path, accessToken(), mimeType, bytes);
     }
 
