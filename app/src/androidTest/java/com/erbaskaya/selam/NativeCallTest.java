@@ -24,18 +24,25 @@ public class NativeCallTest {
         Observer obsA=new Observer(),obsB=new Observer();
         try {
             PeerConnection.RTCConfiguration config=new PeerConnection.RTCConfiguration(Collections.emptyList());config.sdpSemantics=PeerConnection.SdpSemantics.UNIFIED_PLAN;
+            config.continualGatheringPolicy=PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY;
             a=factory.createPeerConnection(config,obsA);b=factory.createPeerConnection(config,obsB);assertNotNull(a);assertNotNull(b);
             source=factory.createAudioSource(new MediaConstraints());trackA=factory.createAudioTrack("a",source);trackB=factory.createAudioTrack("b",source);
             a.addTrack(trackA,Collections.singletonList("a-stream"));b.addTrack(trackB,Collections.singletonList("b-stream"));
-            set(a,true,create(a,true));assertTrue("Caller gathers host ICE",obsA.gathered.await(15,TimeUnit.SECONDS));
+            set(a,true,create(a,true));set(b,false,a.getLocalDescription());
+            set(b,true,create(b,false));set(a,false,b.getLocalDescription());
+            // Android's network callbacks can arrive AFTER the first empty gathering cycle.
+            // Relay every later candidate, exactly as the app's continual/trickle ICE path does.
+            int sentA=0,sentB=0;long deadline=android.os.SystemClock.elapsedRealtime()+20000;
+            while(android.os.SystemClock.elapsedRealtime()<deadline){
+                while(sentA<obsA.candidates.size())assertTrue(b.addIceCandidate(obsA.candidates.get(sentA++)));
+                while(sentB<obsB.candidates.size())assertTrue(a.addIceCandidate(obsB.candidates.get(sentB++)));
+                if(obsA.connected.getCount()==0&&obsB.connected.getCount()==0)break;
+                Thread.sleep(50);
+            }
             assertFalse("Caller has ICE candidates",obsA.candidates.isEmpty());
-            set(b,false,a.getLocalDescription());for(IceCandidate candidate:obsA.candidates)assertTrue(b.addIceCandidate(candidate));
-            set(b,true,create(b,false));
-            assertTrue("Callee gathers host ICE",obsB.gathered.await(15,TimeUnit.SECONDS));
             assertFalse("Callee has ICE candidates",obsB.candidates.isEmpty());
-            set(a,false,b.getLocalDescription());for(IceCandidate candidate:obsB.candidates)assertTrue(a.addIceCandidate(candidate));
-            assertTrue("Caller connects",obsA.connected.await(20,TimeUnit.SECONDS));
-            assertTrue("Callee connects",obsB.connected.await(20,TimeUnit.SECONDS));
+            assertEquals("Caller connects",0,obsA.connected.getCount());
+            assertEquals("Callee connects",0,obsB.connected.getCount());
             assertTrue(a.getLocalDescription().description.contains("m=audio"));
         } finally {if(a!=null)a.dispose();if(b!=null)b.dispose();if(trackA!=null)trackA.dispose();if(trackB!=null)trackB.dispose();if(source!=null)source.dispose();factory.dispose();}
     }
