@@ -1,8 +1,12 @@
-# Selam 1.6.3 · bildirim sesi ve arama kapatma
+# Selam 1.6.4 · Firebase Android bağlantısı
+
+Android uygulaması `selam-507819` Firebase projesine bağlandı. APK, telefonun bildirim tokenını alıp mevcut Selam hesabına kaydeder. Derleme eksik veya başka projeye ait Firebase yapılandırmasıyla yayınlanamaz.
+
+**Sunucudan FCM gönderimi henüz etkinleştirilmedi.** Supabase `FIREBASE_SERVICE_ACCOUNT` bağlantısı ve gerçek telefon testi tamamlanmalıdır. Bu adım tamamlanana kadar uygulama kapalıyken bildirim teslimatı doğrulanmış değildir. Kurulum: [Push kurulumu](docs/push-setup.md).
+
+## Sürüm 1.6.3 yenilikleri
 
 Açık sohbette yeni mesaj sesi, ses testi/kanal ayarları ve arayan kapatınca karşı taraftaki pencerenin kapanması eklendi. Aynı mesajın iki teslimat yolundan gelmesi ikinci ses oluşturmaz. Ses kapalı, sohbet sessizde veya Android izni kapalıysa ses çalınmaz.
-
-**FCM kodu hazır; Firebase yapılandırması tamamlanmadan uygulama kapalıyken push aktif değildir.** Android `google-services.json` ve Supabase tarafında Firebase servis hesabı bağlantısı gerekir. Kurulum, testler ve sınırlar: [Push kurulumu](docs/push-setup.md).
 
 # Selam Android
 

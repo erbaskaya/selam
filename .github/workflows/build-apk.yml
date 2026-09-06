@@ -84,11 +84,16 @@ jobs:
           if raw:
               data = json.loads(raw)
               assert 'private_key' not in data, 'Android configuration required, not service-account credentials'
-              assert any(c.get('client_info', {}).get('android_client_info', {}).get('package_name') == 'com.erbaskaya.selam' for c in data.get('client', [])), 'Wrong Android package'
               pathlib.Path('app/google-services.json').write_text(raw)
-              print('Firebase Android configuration supplied')
-          else:
-              print('Firebase not configured: this build cannot receive cloud push notifications')
+          data = json.loads(pathlib.Path('app/google-services.json').read_text())
+          assert 'private_key' not in data and data.get('type') != 'service_account', 'Server keys must never enter Android builds'
+          info = data.get('project_info', {})
+          assert info.get('project_id') == 'selam-507819' and str(info.get('project_number')) == '720165272753', 'Wrong Firebase project'
+          clients = [c for c in data.get('client', []) if c.get('client_info', {}).get('android_client_info', {}).get('package_name') == 'com.erbaskaya.selam']
+          assert len(clients) == 1, 'Exactly one Selam Android client is required'
+          assert clients[0].get('client_info', {}).get('mobilesdk_app_id'), 'Missing Firebase Android app ID'
+          assert clients[0].get('api_key') and clients[0]['api_key'][0].get('current_key'), 'Missing Firebase Android client API key'
+          print('Firebase Android configured: selam-507819 / com.erbaskaya.selam')
           PYCONFIG
 
       - name: Push gönderici testleri

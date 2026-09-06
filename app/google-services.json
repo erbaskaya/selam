@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "720165272753",
+    "project_id": "selam-507819",
+    "storage_bucket": "selam-507819.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:720165272753:android:31a386d5e92943675c7690",
+        "android_client_info": {
+          "package_name": "com.erbaskaya.selam"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBjR0u7CuoLv2druTUlNyjRviGFWBvsylE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

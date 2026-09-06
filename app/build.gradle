@@ -4,8 +4,11 @@ plugins {
 
 // Client identifiers only. Server/service-account credentials must never enter an APK.
 def firebaseFile = file("google-services.json")
-def firebase = firebaseFile.exists() ? new groovy.json.JsonSlurper().parse(firebaseFile) : null
+if (!firebaseFile.exists()) throw new GradleException("Firebase Android configuration is required: app/google-services.json")
+def firebase = new groovy.json.JsonSlurper().parse(firebaseFile)
 if (firebase?.private_key) throw new GradleException("Use Android google-services.json, never a service-account key")
+if (firebase?.project_info?.project_id != "selam-507819" || firebase?.project_info?.project_number?.toString() != "720165272753")
+    throw new GradleException("Firebase configuration must belong to the Selam project selam-507819")
 def firebaseClient = firebase?.client?.find { it.client_info?.android_client_info?.package_name == "com.erbaskaya.selam" }
 if (firebase && !firebaseClient) throw new GradleException("Firebase Android package must be com.erbaskaya.selam")
 def firebaseValues = [FIREBASE_APP_ID: firebaseClient?.client_info?.mobilesdk_app_id,
@@ -23,8 +26,8 @@ android {
         minSdk 26
         targetSdk 36
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-        versionCode 18
-        versionName "1.6.3"
+        versionCode 19
+        versionName "1.6.4"
         buildConfigField "boolean", "PUSH_CONFIGURED", firebaseClient ? "true" : "false"
         firebaseValues.each { key, value -> buildConfigField "String", key, groovy.json.JsonOutput.toJson(value?.toString() ?: "") }
 
