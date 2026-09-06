@@ -39,3 +39,7 @@ Normal gönderim mesaj kaydedilince pg_net ile hemen başlar; dakikalık görev 
 CI: izole Postgres yetki/teslimat testleri, HTTP gönderici mock testleri, Android ses kanalı/dedup/arama kapanma testleri ve native WebRTC bağlantı testi. Gerçek Firebase projesi/anahtarı ve fiziksel cihaz tokenı olmadan FCM'nin telefona ulaştığı doğrulanamaz. Yapılandırma eksikken bu sürüm için “uygulama kapalıyken bildirim düzeldi” denmemelidir.
 
 Kaynaklar: https://firebase.google.com/docs/cloud-messaging/android/receive-messages , https://developer.android.com/training/monitoring-device-state/doze-standby , https://firebase.google.com/docs/cloud-messaging/send/v1-api
+
+## Canlı veritabanı kaydı
+
+Migration sürümü: `20260906080245`. `private.push_devices`, `private.push_jobs`, `private.push_config` için RLS açık, istemci tablo erişimi kapalıdır. Bu tabloların `rls_enabled_no_policy` bilgi bildirimi bilinçli olarak tüm istemci satır erişiminin reddedildiğini belirtir; yalnız kontrollü kayıt işlevi ve service-role worker erişir. [Supabase RLS danışman açıklaması](https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy).
