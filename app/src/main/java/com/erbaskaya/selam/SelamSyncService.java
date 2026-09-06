@@ -43,7 +43,10 @@ public class SelamSyncService extends Service {
         if(!user.equals(api.userId())){
             if(realtime!=null)realtime.close();if(alerts!=null)alerts.close();
             user=api.userId();alerts=new SelamAlerts(this,api);alerts.start();
-            realtime=new RealtimeConnection(api,kind->{alerts.refresh(kind);SyncEvents.dispatch(kind);});
+            realtime=new RealtimeConnection(api,new RealtimeConnection.Listener(){
+                public void onChange(String kind){alerts.refresh(kind);SyncEvents.dispatch(kind);}
+                public void onConnection(boolean connected){alerts.setRealtimeConnected(connected);}
+            });
             realtime.start();
         }else if(alerts!=null)alerts.refresh("all");
         return START_STICKY;

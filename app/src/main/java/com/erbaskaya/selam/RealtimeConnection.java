@@ -8,7 +8,7 @@ import java.util.concurrent.TimeUnit;
 
 /** Supabase Phoenix v1 protocol, with per-user RLS, reconnect and token rotation. */
 final class RealtimeConnection {
-    interface Listener { void onChange(String kind); }
+    interface Listener { void onChange(String kind); default void onConnection(boolean connected) { } }
     private final SupabaseClient api;
     private final Listener listener;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -75,7 +75,7 @@ final class RealtimeConnection {
                 if(message.optString("ref").equals(heartbeatRef)){heartbeatRef=null;return;}
                 if(topic.equals(message.optString("topic"))&&message.optString("ref").equals(joinRef)&&!joined){
                     if(!"ok".equals(message.getJSONObject("payload").optString("status"))){disconnected(current);return;}
-                    joined=true;attempt=0;main.removeCallbacks(joinTimeout);main.post(heartbeat);
+                    joined=true;attempt=0;main.removeCallbacks(joinTimeout);main.post(heartbeat);listener.onConnection(true);
                     listener.onChange("all"); // Catch up after a network gap before listening for more events.
                 }
             } else if("phx_error".equals(event)||"phx_close".equals(event))disconnected(current);
@@ -102,6 +102,7 @@ final class RealtimeConnection {
         if(!running||current!=generation)return;
         generation++;joined=false;heartbeatRef=null;main.removeCallbacksAndMessages(null);
         if(socket!=null){socket.cancel();socket=null;}
+        listener.onConnection(false);
         main.postDelayed(reconnect,Math.min(30000,1000L<<Math.min(attempt++,5)));
     }
     void close() { running=false;generation++;main.removeCallbacksAndMessages(null);if(socket!=null)socket.cancel();socket=null;http.dispatcher().executorService().shutdown();http.connectionPool().evictAll(); }

@@ -14,9 +14,10 @@ public class NativeCallTest {
     private android.app.Instrumentation getInstrumentation(){return InstrumentationRegistry.getInstrumentation();}
     @Test public void testTwoNativeAudioPeersConnect() throws Exception {
         android.content.Context context=getInstrumentation().getTargetContext();
-        getInstrumentation().getUiAutomation().executeShellCommand("pm grant "+context.getPackageName()+" android.permission.RECORD_AUDIO").close();
+        getInstrumentation().getUiAutomation().grantRuntimePermission(context.getPackageName(),android.Manifest.permission.RECORD_AUDIO);
         assertEquals(android.content.pm.PackageManager.PERMISSION_GRANTED,context.checkSelfPermission(android.Manifest.permission.ACCESS_NETWORK_STATE));
         PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(context).createInitializationOptions());
+        Logging.enableLogToDebugOutput(Logging.Severity.LS_INFO);
         JavaAudioDeviceModule module=JavaAudioDeviceModule.builder(context).createAudioDeviceModule();
         PeerConnectionFactory factory=PeerConnectionFactory.builder().setAudioDeviceModule(module).createPeerConnectionFactory();module.release();
         PeerConnection a=null,b=null;AudioSource source=null;AudioTrack trackA=null,trackB=null;
@@ -27,9 +28,12 @@ public class NativeCallTest {
             source=factory.createAudioSource(new MediaConstraints());trackA=factory.createAudioTrack("a",source);trackB=factory.createAudioTrack("b",source);
             a.addTrack(trackA,Collections.singletonList("a-stream"));b.addTrack(trackB,Collections.singletonList("b-stream"));
             set(a,true,create(a,true));assertTrue("Caller gathers host ICE",obsA.gathered.await(15,TimeUnit.SECONDS));
-            set(b,false,a.getLocalDescription());set(b,true,create(b,false));
+            assertFalse("Caller has ICE candidates",obsA.candidates.isEmpty());
+            set(b,false,a.getLocalDescription());for(IceCandidate candidate:obsA.candidates)assertTrue(b.addIceCandidate(candidate));
+            set(b,true,create(b,false));
             assertTrue("Callee gathers host ICE",obsB.gathered.await(15,TimeUnit.SECONDS));
-            set(a,false,b.getLocalDescription());
+            assertFalse("Callee has ICE candidates",obsB.candidates.isEmpty());
+            set(a,false,b.getLocalDescription());for(IceCandidate candidate:obsB.candidates)assertTrue(a.addIceCandidate(candidate));
             assertTrue("Caller connects",obsA.connected.await(20,TimeUnit.SECONDS));
             assertTrue("Callee connects",obsB.connected.await(20,TimeUnit.SECONDS));
             assertTrue(a.getLocalDescription().description.contains("m=audio"));
@@ -50,11 +54,12 @@ public class NativeCallTest {
     static class Sdp implements SdpObserver {public void onCreateSuccess(SessionDescription s){}public void onSetSuccess(){}public void onCreateFailure(String s){}public void onSetFailure(String s){}}
     static class Observer implements PeerConnection.Observer {
         final CountDownLatch gathered=new CountDownLatch(1),connected=new CountDownLatch(1);
+        final List<IceCandidate> candidates=new CopyOnWriteArrayList<>();
         public void onSignalingChange(PeerConnection.SignalingState s){}
-        public void onIceConnectionChange(PeerConnection.IceConnectionState s){if(s==PeerConnection.IceConnectionState.CONNECTED||s==PeerConnection.IceConnectionState.COMPLETED)connected.countDown();}
+        public void onIceConnectionChange(PeerConnection.IceConnectionState s){android.util.Log.i("SelamNativeTest","ICE state "+s);if(s==PeerConnection.IceConnectionState.CONNECTED||s==PeerConnection.IceConnectionState.COMPLETED)connected.countDown();}
         public void onIceConnectionReceivingChange(boolean b){}
         public void onIceGatheringChange(PeerConnection.IceGatheringState s){if(s==PeerConnection.IceGatheringState.COMPLETE)gathered.countDown();}
-        public void onIceCandidate(IceCandidate c){}public void onIceCandidatesRemoved(IceCandidate[] c){}
+        public void onIceCandidate(IceCandidate c){candidates.add(c);android.util.Log.i("SelamNativeTest","ICE "+c.sdp);}public void onIceCandidatesRemoved(IceCandidate[] c){}
         public void onAddStream(MediaStream s){}public void onRemoveStream(MediaStream s){}public void onDataChannel(DataChannel d){}
         public void onRenegotiationNeeded(){}public void onAddTrack(RtpReceiver r,MediaStream[] s){}
     }

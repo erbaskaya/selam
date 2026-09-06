@@ -78,6 +78,10 @@ Cihaz hesabının oturumu uygulama verilerinde tutulur. Uygulama verileri silini
 
 Uygulamayı kaldırmak sunucudaki hesabı otomatik silmez. Sürüm 1.4.0'dan yükselten mevcut kullanıcıların uygulamayı silmeden önce Ayarlar'dan kurtarma PIN'i belirlemesi gerekir. PIN tanımlanmamış eski bir hesap, yalnızca telefon numarası yazılarak açılamaz.
 
+## 1.6.2 sunucu kaydı
+
+`delivery_realtime_v162` canlı Supabase projesine `20260906001056` sürümüyle uygulanmıştır. CLI ile oluşturulan dosyanın sürüm numarası canlı kayıtla eşleştirilmiştir. Yalnızca `selam_delivery_events` tablosu Realtime yayınındadır; içerik yerine kullanıcıya özel değişiklik sayacı taşır. `authenticated` rolü yalnızca kendi `auth.uid()` satırını okuyabilir, yazamaz; `anon` rolünün erişimi yoktur. Supabase danışmanındaki `auth_allow_anonymous_sign_ins` bildirimi, SMS yerine kullanılan anonim cihaz oturumlarından kaynaklanır; herkese açık erişim anlamına gelmez. [Supabase açıklaması](https://supabase.com/docs/guides/database/database-advisors?queryGroups=lint&lint=0012_auth_allow_anonymous_sign_ins).
+
 ## Supabase bağlantısı
 
 Uygulama Selam Supabase projesine önceden bağlanmıştır. supabase/schema.sql şeması projeye uygulanmıştır. Supabase Auth içinde **Anonymous Sign-Ins** etkin olmalıdır.

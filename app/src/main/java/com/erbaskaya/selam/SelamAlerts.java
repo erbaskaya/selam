@@ -36,6 +36,7 @@ final class SelamAlerts {
     private final Runnable pollMessages = this::checkMessages;
     private final Runnable pollCalls = this::checkCalls;
     private boolean running;
+    private boolean realtimeConnected;
     private boolean messagesInFlight,callsInFlight,messagesPending,callsPending;
 
     SelamAlerts(Context activity, SupabaseClient api) {
@@ -51,6 +52,8 @@ final class SelamAlerts {
         if(!"call".equals(kind)){handler.removeCallbacks(pollMessages);checkMessages();}
         if(!"message".equals(kind)){handler.removeCallbacks(pollCalls);checkCalls();}
     }
+
+    void setRealtimeConnected(boolean value) { realtimeConnected=value;if(!value)refresh("all"); }
 
     void start() {
         if (running) return;
@@ -107,13 +110,13 @@ final class SelamAlerts {
 
     private void scheduleMessages() {
         handler.removeCallbacks(pollMessages);
-        if (running) handler.postDelayed(pollMessages, messagesPending?0:POLL_MS);
+        if (running) handler.postDelayed(pollMessages, messagesPending?0:realtimeConnected?POLL_MS:3000);
         messagesPending=false;
     }
 
     private void scheduleCalls() {
         handler.removeCallbacks(pollCalls);
-        if (running) handler.postDelayed(pollCalls, callsPending?0:POLL_MS);
+        if (running) handler.postDelayed(pollCalls, callsPending?0:realtimeConnected?POLL_MS:3000);
         callsPending=false;
     }
 

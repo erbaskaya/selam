@@ -201,6 +201,7 @@ public class CallActivity extends Activity {
         servers.add(PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer());
         PeerConnection.RTCConfiguration configuration = new PeerConnection.RTCConfiguration(servers);
         configuration.sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN;
+        configuration.continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY;
         peerConnection = factory.createPeerConnection(configuration, new PeerObserver());
         if (peerConnection == null) {
             fail("Telefon bu internet aramasını başlatamadı.");
