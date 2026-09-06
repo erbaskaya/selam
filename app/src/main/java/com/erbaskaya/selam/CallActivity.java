@@ -254,7 +254,7 @@ public class CallActivity extends Activity {
         api.startAudioCall(chatId, local.description, new SupabaseClient.Callback<String>() {
             @Override public void onSuccess(String id) {
                 handler.post(()->{
-                if(finished){api.endAudioCall(id,emptyCallback());return;}
+                if(finished){CallTermination.send(CallActivity.this,id,false);return;}
                 callId = id;
                 handler.removeCallbacks(connectionTimeout);handler.postDelayed(connectionTimeout,65000);
                 flushLocalIce();
@@ -280,7 +280,7 @@ public class CallActivity extends Activity {
                 handler.post(()->{
                 if(finished||peerConnection==null)return;
                 if (!"ringing".equals(state.state)) {
-                    runOnUiThread(() -> fail("Arama artık aktif değil."));
+                    remoteEnded();
                     return;
                 }
                 setRemote(new SessionDescription(SessionDescription.Type.OFFER, state.offerSdp), () -> {
@@ -360,10 +360,10 @@ public class CallActivity extends Activity {
                     setRemote(new SessionDescription(SessionDescription.Type.ANSWER, state.answerSdp),
                             () -> runOnUiThread(() -> status("Bağlanıyor…")));
                 } else if ("declined".equals(state.state)) {
-                    runOnUiThread(() -> fail("Arama reddedildi."));
+                    remoteEnded();
                     return;
                 } else if ("ended".equals(state.state) || "missed".equals(state.state)) {
-                    runOnUiThread(() -> fail("Arama sona erdi."));
+                    remoteEnded();
                     return;
                 }
                 handler.postDelayed(pollState, 1_000L);
@@ -433,15 +433,21 @@ public class CallActivity extends Activity {
         for (IceCandidate candidate : copy) sendLocalIce(candidate);
     }
 
+    private void remoteEnded(){
+        finished=true;handler.removeCallbacksAndMessages(null);
+        if(callId!=null)getSystemService(android.app.NotificationManager.class).cancel(callId.hashCode());
+        releasePeer();finish();
+    }
+
     private void decline() {
         finished = true;
-        if (callId != null) api.declineAudioCall(callId, emptyCallback());
+        CallTermination.send(this,callId,true);
         finish();
     }
 
     private void hangUp() {
         finished = true;
-        if (callId != null) api.endAudioCall(callId, emptyCallback());
+        CallTermination.send(this,callId,false);
         finish();
     }
 
@@ -470,7 +476,7 @@ public class CallActivity extends Activity {
         if(Looper.myLooper()!=Looper.getMainLooper()){handler.post(()->fail(message));return;}
         if(isFinishing()||finished)return;
         finished=true;handler.removeCallbacksAndMessages(null);
-        if(callId!=null)api.endAudioCall(callId,emptyCallback());
+        CallTermination.send(this,callId,false);
         releasePeer();
         statusView.setText(message);
         muteButton.setEnabled(false);speakerButton.setEnabled(false);
@@ -489,7 +495,7 @@ public class CallActivity extends Activity {
     protected void onDestroy() {
         SyncEvents.remove(deliveryListener);
         handler.removeCallbacksAndMessages(null);
-        if (!finished && callId != null) api.endAudioCall(callId, emptyCallback());
+        if (!finished) CallTermination.send(this,callId,false);
         finished=true;
         releasePeer();
         api.close();

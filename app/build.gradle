@@ -2,6 +2,18 @@ plugins {
     id "com.android.application"
 }
 
+// Client identifiers only. Server/service-account credentials must never enter an APK.
+def firebaseFile = file("google-services.json")
+def firebase = firebaseFile.exists() ? new groovy.json.JsonSlurper().parse(firebaseFile) : null
+if (firebase?.private_key) throw new GradleException("Use Android google-services.json, never a service-account key")
+def firebaseClient = firebase?.client?.find { it.client_info?.android_client_info?.package_name == "com.erbaskaya.selam" }
+if (firebase && !firebaseClient) throw new GradleException("Firebase Android package must be com.erbaskaya.selam")
+def firebaseValues = [FIREBASE_APP_ID: firebaseClient?.client_info?.mobilesdk_app_id,
+    FIREBASE_API_KEY: firebaseClient?.api_key?.getAt(0)?.current_key,
+    FIREBASE_PROJECT_ID: firebase?.project_info?.project_id,
+    FIREBASE_SENDER_ID: firebase?.project_info?.project_number]
+if (firebase && firebaseValues.values().any { !it }) throw new GradleException("Firebase Android configuration is incomplete")
+
 android {
     namespace "com.erbaskaya.selam"
     compileSdk 36
@@ -11,8 +23,10 @@ android {
         minSdk 26
         targetSdk 36
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-        versionCode 17
-        versionName "1.6.2"
+        versionCode 18
+        versionName "1.6.3"
+        buildConfigField "boolean", "PUSH_CONFIGURED", firebaseClient ? "true" : "false"
+        firebaseValues.each { key, value -> buildConfigField "String", key, groovy.json.JsonOutput.toJson(value?.toString() ?: "") }
 
         def supabaseUrl = System.getenv("SUPABASE_URL") ?: "https://czaangjaxdffliwigcbx.supabase.co"
         // Supabase publishable anahtarı mobil istemcilerde açıkça kullanılmak üzere tasarlanmıştır.
@@ -59,6 +73,7 @@ android {
 }
 
 dependencies {
+    implementation "com.google.firebase:firebase-messaging:25.1.2"
     androidTestImplementation "androidx.test:runner:1.6.2"
     androidTestImplementation "androidx.test.ext:junit:1.2.1"
     implementation "com.squareup.okhttp3:okhttp:4.12.0"

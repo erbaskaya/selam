@@ -147,7 +147,7 @@ public class MainActivity extends Activity {
     }
     @Override protected void onResume() {
         super.onResume();resumed=true;foreground=new java.lang.ref.WeakReference<>(this);SyncEvents.add(deliveryListener);
-        if(myProfile!=null&&myProfile.ready)SelamSyncService.start(this);
+        if(myProfile!=null&&myProfile.ready){SelamSyncService.start(this);PushRegistration.sync(this);}
         if (updateManager != null) updateManager.resumeInstallIfReady();
         if(appearance!=null && !appliedAppearance.equals(appearance.exportGlobal().toString()+appearance.dark())){recreate();return;}
         if("external-chat".equals(screen))showHome();
@@ -180,6 +180,7 @@ public class MainActivity extends Activity {
             if (profile.ready) {
                 requestNotificationPermission();
                 SelamSyncService.start(this);
+                PushRegistration.sync(this);
                 showHome();
                 consumeNotification();
                 String syncKey="synced:"+api.userId();
@@ -1263,30 +1264,11 @@ public class MainActivity extends Activity {
                 REQUEST_AUDIO_PERMISSION);
     }
 
+    private IncomingCallPrompt incomingPrompt;
     void showIncomingCall(SupabaseClient.IncomingCall call) {
-        if (isFinishing() || isDestroyed() || call == null
-                || call.id.equals(visibleIncomingCallId)) return;
-        visibleIncomingCallId = call.id;
-        new AlertDialog.Builder(this)
-                .setTitle(call.callerName)
-                .setMessage("Gelen Selam internet araması")
-                .setCancelable(false)
-                .setNegativeButton("Reddet", (dialog, which) -> {
-                    visibleIncomingCallId = null;
-                    api.declineAudioCall(call.id, uiCallback(done -> { }));
-                })
-                .setPositiveButton("Yanıtla", (dialog, which) -> {
-                    visibleIncomingCallId = null;
-                    Intent answer = new Intent(this, CallActivity.class)
-                            .putExtra(CallActivity.EXTRA_CALL_ID, call.id)
-                            .putExtra(CallActivity.EXTRA_CHAT_ID, call.conversationId)
-                            .putExtra(CallActivity.EXTRA_NAME, call.callerName)
-                            .putExtra(CallActivity.EXTRA_INCOMING, true);
-                    answer.putExtra(CallActivity.EXTRA_AUTO_ANSWER,true);
-                    startActivity(answer);
-                })
-                .setOnDismissListener(dialog -> visibleIncomingCallId = null)
-                .show();
+        if(isFinishing()||isDestroyed()||call==null||(incomingPrompt!=null&&incomingPrompt.showing()))return;
+        incomingPrompt=new IncomingCallPrompt(this,api,call);
+        incomingPrompt.show(()->incomingPrompt=null);
     }
 
     private void launchAudioCall() {

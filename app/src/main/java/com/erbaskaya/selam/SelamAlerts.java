@@ -73,9 +73,7 @@ final class SelamAlerts {
                 messagesInFlight=false;if(!running)return;
                 long newest = after;
                 for (SupabaseClient.MessageNotification item : items) newest = Math.max(newest, item.id);
-                java.util.Map<String,SupabaseClient.MessageNotification> latest=new java.util.LinkedHashMap<>();
-                for(SupabaseClient.MessageNotification item:items)latest.put(item.conversationId,item);
-                for(SupabaseClient.MessageNotification item:latest.values())postMessage(item);
+                for(SupabaseClient.MessageNotification item:items)postMessage(item);
                 if(newest>after)preferences.edit().putLong("last_message_id",newest).apply();
                 if(items.size()==50)messagesPending=true;
                 scheduleMessages();
@@ -121,40 +119,13 @@ final class SelamAlerts {
     }
 
     private void postMessage(SupabaseClient.MessageNotification item) {
-        if(item.conversationId.equals(ChatActivity.foregroundChat)) return;
-        Appearance look=new Appearance(activity);
-        boolean sound=look.sound()&&!look.quiet(),vibrate=look.vibration()&&!look.quiet();
-        String channel=messageChannel(sound,vibrate);
-        if (!canNotify()) {
-            if(sound)playDefaultSound(RingtoneManager.TYPE_NOTIFICATION);
-            if(vibrate){android.os.Vibrator vibrator=(android.os.Vibrator)activity.getSystemService(Context.VIBRATOR_SERVICE);if(vibrator!=null)vibrator.vibrate(android.os.VibrationEffect.createOneShot(160,android.os.VibrationEffect.DEFAULT_AMPLITUDE));}
-            return;
-        }
-        Intent open = new Intent(activity, MainActivity.class).putExtra("open_chat_id",item.conversationId)
-                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        PendingIntent content = PendingIntent.getActivity(activity, (int) (item.id & 0x7fffffff),
-                open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        Notification notification = new Notification.Builder(activity, channel)
-                .setSmallIcon(R.drawable.ic_nav_chats)
-                .setContentTitle(look.preview()?item.senderName:"Selam")
-                .setContentText(look.preview()?item.preview:"Yeni mesajınız var")
-                .setVisibility(Notification.VISIBILITY_PRIVATE)
-                .setPublicVersion(new Notification.Builder(activity,channel).setSmallIcon(R.drawable.ic_nav_chats).setContentTitle("Selam").setContentText("Yeni mesajınız var").build())
-                .setStyle(new Notification.BigTextStyle().bigText(look.preview()?item.preview:"Yeni mesajınız var"))
-                .setContentIntent(content)
-                .setAutoCancel(true)
-                .setCategory(Notification.CATEGORY_MESSAGE)
-                .build();
-        notifications.notify(item.conversationId.hashCode(), notification);
+        MessageNotifications.deliver(activity,api.userId(),item);
     }
 
     private void postIncomingCall(SupabaseClient.IncomingCall call) {
         ChatActivity chat=ChatActivity.foreground.get();MainActivity home=MainActivity.foreground.get();
         if(chat!=null)chat.incomingCall(call);else if(home!=null)home.showIncomingCall(call);
-        if (!canNotify()) {
-            playDefaultSound(RingtoneManager.TYPE_RINGTONE);
-            return;
-        }
+        if (!canNotify()) return;
         Intent answer = new Intent(activity, CallActivity.class)
                 .putExtra(CallActivity.EXTRA_CALL_ID, call.id)
                 .putExtra(CallActivity.EXTRA_NAME, call.callerName)
@@ -174,9 +145,9 @@ final class SelamAlerts {
     }
 
     private boolean canNotify() {
-        return Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
+        return notifications.areNotificationsEnabled() && (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
                 || activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                == PackageManager.PERMISSION_GRANTED;
+                == PackageManager.PERMISSION_GRANTED);
     }
 
     private void playDefaultSound(int type) {
@@ -187,14 +158,6 @@ final class SelamAlerts {
         } catch (Exception ignored) { }
     }
 
-    private String messageChannel(boolean sound,boolean vibrate){
-        String id="selam_messages_"+(sound?"sound":"silent")+(vibrate?"_vibrate":"");
-        NotificationChannel channel=new NotificationChannel(id,"Mesajlar • "+(sound?"sesli":"sessiz")+(vibrate?" • titreşim":""),NotificationManager.IMPORTANCE_HIGH);
-        channel.enableVibration(vibrate);channel.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
-        channel.setSound(sound?RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION):null,
-            new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION_COMMUNICATION_INSTANT).build());
-        notifications.createNotificationChannel(channel);return id;
-    }
     private void createChannels() {
         Uri callSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
         AudioAttributes callAudio = new AudioAttributes.Builder()

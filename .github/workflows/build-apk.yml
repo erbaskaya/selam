@@ -3,7 +3,7 @@ name: Selam APK Oluştur
 on:
   workflow_dispatch:
   push:
-    branches: [main, selam-v160]
+    branches: [main, selam-v160, selam-push-v163]
     paths:
       - "app/**"
       - "supabase/**"
@@ -73,6 +73,26 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.5.0"
+
+      - name: Firebase Android yapılandırması
+        env:
+          FIREBASE_ANDROID_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          python - <<'PYCONFIG'
+          import json, os, pathlib
+          raw = os.environ.get('FIREBASE_ANDROID_JSON', '').strip()
+          if raw:
+              data = json.loads(raw)
+              assert 'private_key' not in data, 'Android configuration required, not service-account credentials'
+              assert any(c.get('client_info', {}).get('android_client_info', {}).get('package_name') == 'com.erbaskaya.selam' for c in data.get('client', [])), 'Wrong Android package'
+              pathlib.Path('app/google-services.json').write_text(raw)
+              print('Firebase Android configuration supplied')
+          else:
+              print('Firebase not configured: this build cannot receive cloud push notifications')
+          PYCONFIG
+
+      - name: Push gönderici testleri
+        run: node --test tests/push-worker.test.mjs
 
       - name: Android ekran ve taslak testleri
         run: gradle :app:testDebugUnitTest --no-daemon --stacktrace

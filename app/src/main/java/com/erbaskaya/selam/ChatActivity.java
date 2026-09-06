@@ -113,6 +113,16 @@ public class ChatActivity extends Activity {
             StringBuilder fp=new StringBuilder();for(SupabaseClient.Message m:items)fp.append(m.fingerprint);
             boolean bottom=list.getCount()==0||list.getLastVisiblePosition()>=list.getCount()-2;
             int first=list.getFirstVisiblePosition(),offset=list.getChildCount()>0?list.getChildAt(0).getTop():0;
+            if(!olderMode&&!starred&&query.isEmpty()&&!fingerprint.isEmpty()){
+                long previous=0;for(SupabaseClient.Message m:messages)previous=Math.max(previous,m.id);
+                boolean incoming=false;for(SupabaseClient.Message m:items)if(m.id>previous&&!m.senderId.equals(api.userId())&&!m.deleted)incoming=true;
+                final long after=previous;
+                if(incoming)api.rpc("selam_chat_alert_enabled",SupabaseClient.json("p_chat_id",chatId),cb(enabled->{
+                    if(!"true".equals(enabled.trim()))return;
+                    for(SupabaseClient.Message item:items)if(item.id>after&&!item.senderId.equals(api.userId())&&!item.deleted)
+                        MessageNotifications.deliver(this,api.userId(),new SupabaseClient.MessageNotification(item.id,chatId,chatName,item.body));
+                }));
+            }
             if(!fp.toString().equals(fingerprint)||immediate){messages=items;fingerprint=fp.toString();list.setAdapter(new MessagesAdapter());if(bottom||immediate)list.setSelection(items.size()-1);else list.setSelectionFromTop(first,offset);}
             older.setEnabled(items.size()==100);historyControls.setVisibility(items.size()==100||starred||!query.isEmpty()?View.VISIBLE:View.GONE);status.setText(starred?"Yıldızlı mesajlar":!query.isEmpty()?"Arama: "+query:items.isEmpty()?"İlk mesajı gönderin":"");status.setVisibility(status.getText().length()==0?View.GONE:View.VISIBLE);
             list.post(this::markRead);if(active)handler.postDelayed(poll,refreshAgain?0:1500);refreshAgain=false;
@@ -151,14 +161,12 @@ public class ChatActivity extends Activity {
     private void stopRecording(boolean keep){handler.removeCallbacks(recordTimeout);if(recorder==null)return;try{recorder.stop();}catch(Exception e){keep=false;}recorder.release();recorder=null;if(recordDialog!=null){recordDialog.dismiss();recordDialog=null;}File file=voiceFile;voiceFile=null;if(file==null)return;if(!keep){file.delete();return;}AlertDialog preview=new AlertDialog.Builder(this).setTitle("Sesli mesaj hazır").setMessage("Göndermeden önce dinleyebilirsiniz.").setNeutralButton("Dinle",null).setNegativeButton("Sil",(d,w)->{stopPlayer();file.delete();}).setPositiveButton("Gönder",(d,w)->{stopPlayer();try{api.sendFile(chatId,new FileInputStream(file),"Sesli-mesaj.m4a","audio/mp4",file.length(),cb(done->{file.delete();olderMode=false;refresh(true);},error->{file.delete();toast(error);}));}catch(Exception e){file.delete();toast("Ses gönderilemedi");}}).setOnCancelListener(d->{stopPlayer();file.delete();}).create();
         preview.setOnShowListener(d->preview.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->play(file.getAbsolutePath(),"Sesli mesaj önizlemesi")));preview.show();
     }
+    private IncomingCallPrompt incomingPrompt;
     void incomingCall(SupabaseClient.IncomingCall call){
-        if(!active||isFinishing())return;
-        new AlertDialog.Builder(this).setTitle(call.callerName).setMessage("Gelen Selam internet araması")
-            .setNegativeButton("Reddet",(d,w)->api.declineAudioCall(call.id,cb(done->{})))
-            .setPositiveButton("Yanıtla",(d,w)->startActivity(new Intent(this,CallActivity.class)
-                .putExtra(CallActivity.EXTRA_CALL_ID,call.id).putExtra(CallActivity.EXTRA_CHAT_ID,call.conversationId)
-                .putExtra(CallActivity.EXTRA_NAME,call.callerName).putExtra(CallActivity.EXTRA_INCOMING,true).putExtra(CallActivity.EXTRA_AUTO_ANSWER,true))).show();
+        if(!active||isFinishing()||(incomingPrompt!=null&&incomingPrompt.showing()))return;
+        incomingPrompt=new IncomingCallPrompt(this,api,call);incomingPrompt.show(()->incomingPrompt=null);
     }
+
     private void play(String source,String title){stopPlayer();try{player=new MediaPlayer();MediaPlayer current=player;current.setDataSource(source);LinearLayout box=column();box.setPadding(dp(20),dp(12),dp(20),dp(12));TextView state=text("Yükleniyor…",16,look.text(),false);box.addView(state);Button speed=action("Hız: 1×","Oynatma hızı",()->{try{float rate=current.getPlaybackParams().getSpeed();float next=rate<1.4f?1.5f:rate<1.9f?2f:1f;current.setPlaybackParams(current.getPlaybackParams().setSpeed(next));state.setText("Oynatılıyor • "+next+"×");}catch(Exception ignored){}});speed.setTextSize(16);box.addView(speed);playDialog=new AlertDialog.Builder(this).setTitle(title).setView(box).setPositiveButton("Kapat",(d,w)->stopPlayer()).setOnCancelListener(d->stopPlayer()).show();current.setOnPreparedListener(p->{if(player==p){p.start();state.setText("Oynatılıyor");}});current.setOnCompletionListener(p->state.setText("Tamamlandı"));current.setOnErrorListener((p,a,b)->{toast("Ses oynatılamadı");stopPlayer();return true;});current.prepareAsync();}catch(Exception e){stopPlayer();toast("Ses açılamadı");}}
     private void stopPlayer(){if(player!=null){player.release();player=null;}if(playDialog!=null){playDialog.dismiss();playDialog=null;}}
     @Override public void onRequestPermissionsResult(int r,String[] p,int[] grants){super.onRequestPermissionsResult(r,p,grants);if(r==RECORD&&grants.length>0&&grants[0]==PackageManager.PERMISSION_GRANTED)record();else if(r==RECORD)toast("Ses kaydı için mikrofon izni gerekli.");}

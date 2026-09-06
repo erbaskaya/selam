@@ -56,6 +56,10 @@ public final class AppearanceActivity extends Activity {
             toggle("Mesaj sesi","sound",true);
             toggle("Mesaj titreşimi","vibration",true);
             toggle("Gece sessizliği · 22.00–08.00","quiet",false);
+            row("Bildirim durumunu kontrol et",()->new AlertDialog.Builder(this).setTitle("Bildirim durumu")
+                .setMessage(PushRegistration.status(this)+"\n\n"+MessageNotifications.diagnostic(this)).setPositiveButton("Tamam",null).show());
+            row("Bildirim sesini dene",()->{MessageNotifications.test(this);Toast.makeText(this,MessageNotifications.diagnostic(this),Toast.LENGTH_LONG).show();});
+            row("Mesaj sesini seç / kanal ayarları",()->startActivity(MessageNotifications.settings(this)));
             row("Telefonun bildirim ve zil sesi ayarları",()->startActivity(new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE,getPackageName())));
         }else row("Bu sohbet için genel ayarlara dön",()->{look.clearChat(chatId);render();});
         row("Kaydet",()->{

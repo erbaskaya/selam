@@ -1,3 +1,9 @@
+# Selam 1.6.3 · bildirim sesi ve arama kapatma
+
+Açık sohbette yeni mesaj sesi, ses testi/kanal ayarları ve arayan kapatınca karşı taraftaki pencerenin kapanması eklendi. Aynı mesajın iki teslimat yolundan gelmesi ikinci ses oluşturmaz. Ses kapalı, sohbet sessizde veya Android izni kapalıysa ses çalınmaz.
+
+**FCM kodu hazır; Firebase yapılandırması tamamlanmadan uygulama kapalıyken push aktif değildir.** Android `google-services.json` ve Supabase tarafında Firebase servis hesabı bağlantısı gerekir. Kurulum, testler ve sınırlar: [Push kurulumu](docs/push-setup.md).
+
 # Selam Android
 
 Selam, bağımsız çalışan mavi temalı Android mesajlaşma uygulamasıdır. iPhone kaynakları korunuyor; iPhone geliştirmesi şimdilik beklemede. WebView kullanmaz ve ChatGPT oturumu istemez.

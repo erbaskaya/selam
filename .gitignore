@@ -5,3 +5,7 @@ local.properties
 *.iml
 *.jks
 *.keystore
+
+# Firebase Android config is injected by CI; server keys never belong here.
+app/google-services.json
+*service-account*.json

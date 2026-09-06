@@ -1,0 +1,5 @@
+
+[functions.selam-push]
+# A 256-bit per-job capability is checked atomically in a service-role-only RPC.
+# User JWTs and anonymous requests cannot claim jobs or supply recipients.
+verify_jwt = false
