@@ -2,7 +2,7 @@
 
 Android uygulaması `selam-507819` Firebase projesine bağlandı. APK, telefonun bildirim tokenını alıp mevcut Selam hesabına kaydeder. Derleme eksik veya başka projeye ait Firebase yapılandırmasıyla yayınlanamaz.
 
-**Sunucudan FCM gönderimi henüz etkinleştirilmedi.** Supabase `FIREBASE_SERVICE_ACCOUNT` bağlantısı ve gerçek telefon testi tamamlanmalıdır. Bu adım tamamlanana kadar uygulama kapalıyken bildirim teslimatı doğrulanmış değildir. Kurulum: [Push kurulumu](docs/push-setup.md).
+**Sunucudan FCM gönderimi etkin.** Firebase hizmet hesabı Google tarafından doğrulandı; FCM `validate_only` kontrolü HTTP 200 döndürdü. Mesaj kaydında anlık gönderim ve dakikalık hata yeniden denemesi canlıdır. Telefon teslimatı için 1.6.4'ün bir kez açılıp bildirim izni ve cihaz kaydının tamamlanması gerekir; fiziksel cihaz testi henüz tamamlanmadı. [Push kurulumu](docs/push-setup.md) · [Canlı etkinleştirme ve doğrulama kaydı](docs/operations/push-activation-20260906.md).
 
 ## Sürüm 1.6.3 yenilikleri
 
@@ -21,7 +21,7 @@ Selam, bağımsız çalışan mavi temalı Android mesajlaşma uygulamasıdır. 
 - Ses bağlantısında 3,5 saniyelik sabit hazırlık beklemesi kaldırıldı; ICE adayları hazır oldukça gönderilir
 - Aynı anda süresi dolan oturum isteklerinde tek token yenilemesi; geçici ağ hatasında oturum silinmez
 
-Her iki telefonda da yeni sürümü kurun ve Android bildirim/mikrofon izinlerini verin. Arka plan servisi açıkken Android'de “Selam mesajları dinliyor” bildirimi görünür. Telefonun zorla durdurması, pil kısıtlamaları veya bağlantı kesilmesi teslimatı geciktirebilir; FCM push henüz bağlı değildir. TURN sunucusu henüz yapılandırılmadığından bazı mobil ağlar/VPN'ler arasında arama bağlantısı kurulamayabilir. Bu sürümün emülatör testi gerçek native WebRTC ile iki yerel ses eşini bağlar; farklı fiziksel telefonlar ve operatörler arasındaki aramayı doğrulamaz.
+Her iki telefonda da yeni sürümü kurun ve Android bildirim/mikrofon izinlerini verin. Arka plan servisi açıkken Android'de “Selam mesajları dinliyor” bildirimi görünür. Telefonun zorla durdurması, pil kısıtlamaları veya bağlantı kesilmesi teslimatı geciktirebilir. FCM desteği için 1.6.4 kullanın; 1.6.2 yalnız arka plan bağlantısını kullanır. TURN sunucusu henüz yapılandırılmadığından bazı mobil ağlar/VPN'ler arasında arama bağlantısı kurulamayabilir. Bu sürümün emülatör testi gerçek native WebRTC ile iki yerel ses eşini bağlar; farklı fiziksel telefonlar ve operatörler arasındaki aramayı doğrulamaz.
 
 ## Sürüm 1.6.1 yenilikleri
 

@@ -17,11 +17,13 @@ FCM, uygulamanın ekranı veya kalıcı bağlantısı çalışmasa da Google Pla
 
 ## Etkinleştirmek için gerekenler
 
+**Canlı durum (6 Eylül 2026):** Firebase anahtarı Supabase Secrets içinde kayıtlı ve Google OAuth/FCM yetki doğrulaması başarılıdır. `pg_net`, `pg_cron`, anlık gönderici bağlantısı ve `selam-push-retry` görevi etkinleştirildi. [İşlem ve doğrulama kaydı](operations/push-activation-20260906.md). Aşağıdaki sunucu kurulum adımları bu projede tamamlandı; kalan adım 1.6.4 ile gerçek telefon kaydı ve teslimat/ses testidir.
+
 1. Firebase Console'da bir proje ve **com.erbaskaya.selam** paket adlı Android uygulaması oluşturun. Analytics/telefonla giriş/SMS hizmeti gerekli değildir.
 2. **Tamamlandı (1.6.4):** Android uygulamasının **google-services.json** dosyası `app/google-services.json` olarak kaydedildi. Proje: `selam-507819`, gönderici: `720165272753`, Android App ID: `1:720165272753:android:31a386d5e92943675c7690`. Bu dosya mobil uygulama tanımlarıdır; sunucu özel anahtarı değildir. [Firebase, istemci anahtarlarının kaynak kodunda bulunmasına izin verir](https://firebase.google.com/docs/projects/api-keys). CI, isteğe bağlı `GOOGLE_SERVICES_JSON` secret'ını aynı proje/paket kontrolüyle kullanabilir; secret zorunlu değildir. Eksik veya farklı projeye ait yapılandırma derlemeyi durdurur.
 3. Google Cloud IAM'de yalnız Firebase Cloud Messaging API gönderme yetkili bir service account oluşturun; FCM API etkin olmalı. JSON anahtarını **yalnız Supabase Edge Functions Secrets** alanında **FIREBASE_SERVICE_ACCOUNT** adıyla saklayın. Özel anahtar GitHub kaynak dosyalarına veya APK'ya girmez.
 4. `supabase/functions/selam-push/index.ts` ve `worker.mjs` dosyalarını `selam-push` Edge Function olarak dağıtın. `verify_jwt=false`: istek gövdesindeki 256 bit, işe özel ve bir gün süreli rastgele anahtar, service-role-only RPC'de doğrulanır. Anahtar olmadan alıcı/cihaz seçilemez. Worker API'leri `anon` ve `authenticated` rollerine kapalıdır.
-5. Migration'ı uygulayın; pg_net ve pg_cron eklentilerini etkinleştirin. Gerçek Firebase gönderimi test edildikten sonra SQL Editor'da etkinleştirin:
+5. Migration'ı uygulayın; pg_net ve pg_cron eklentilerini etkinleştirin. Firebase gönderme yetkisini FCM `validate_only` isteğiyle doğruladıktan sonra SQL Editor'da etkinleştirin:
 
 ```sql
 insert into private.push_config(singleton,url)
@@ -37,6 +39,8 @@ Normal gönderim mesaj kaydedilince pg_net ile hemen başlar; dakikalık görev 
 ## Doğrulama sınırı
 
 CI: izole Postgres yetki/teslimat testleri, HTTP gönderici mock testleri, Android ses kanalı/dedup/arama kapanma testleri ve native WebRTC bağlantı testi. Gerçek Firebase projesi/anahtarı ve fiziksel cihaz tokenı olmadan FCM'nin telefona ulaştığı doğrulanamaz. Yapılandırma eksikken bu sürüm için “uygulama kapalıyken bildirim düzeldi” denmemelidir.
+
+Canlı sunucuda OAuth ve FCM `validate_only` isteği başarılıdır. Bu kontrol telefona bildirim göndermez; cihaz kaydı ve fiziksel teslimat kanıtı yerine geçmez. İlk etkinleştirme kontrolünde kayıtlı FCM cihazı yoktu.
 
 Kaynaklar: https://firebase.google.com/docs/cloud-messaging/android/receive-messages , https://developer.android.com/training/monitoring-device-state/doze-standby , https://firebase.google.com/docs/cloud-messaging/send/v1-api
 
