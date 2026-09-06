@@ -61,7 +61,7 @@ import java.util.Map;
 
 public class MainActivity extends Activity {
     static java.lang.ref.WeakReference<MainActivity> foreground=new java.lang.ref.WeakReference<>(null);
-    private final SyncEvents.Listener deliveryListener=kind->{if(resumed&&"home".equals(screen))refreshHome();};
+    private final SyncEvents.Listener deliveryListener=kind->{if(this.resumed&&"home".equals(this.screen))refreshHome();};
     private int BLUE = Color.rgb(25, 105, 230);
     private Appearance appearance;
     private int SURFACE = Color.WHITE;

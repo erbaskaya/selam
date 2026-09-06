@@ -15,6 +15,8 @@ final class RealtimeConnection {
     private final OkHttpClient http = new OkHttpClient.Builder().connectTimeout(10,TimeUnit.SECONDS)
             .readTimeout(0,TimeUnit.MILLISECONDS).pingInterval(20,TimeUnit.SECONDS).build();
     private WebSocket socket;
+    private final WebSocket.Factory sockets;
+    private String joinRef;
     private String topic,token;
     private boolean running,joined;
     private int generation,attempt,ref;
@@ -23,7 +25,8 @@ final class RealtimeConnection {
     private final Runnable joinTimeout = () -> disconnected(generation);
     private final Runnable heartbeat = this::beat;
 
-    RealtimeConnection(SupabaseClient api,Listener listener) { this.api=api;this.listener=listener; }
+    RealtimeConnection(SupabaseClient api,Listener listener) { this(api,listener,null); }
+    RealtimeConnection(SupabaseClient api,Listener listener,WebSocket.Factory sockets) { this.api=api;this.listener=listener;this.sockets=sockets==null?http:sockets; }
     void start() { if(running)return;running=true;connect(); }
     private void connect() {
         if(!running)return;
@@ -34,7 +37,7 @@ final class RealtimeConnection {
                 token=value;topic="realtime:selam:"+api.userId();
                 String url=BuildConfig.SUPABASE_URL.replaceFirst("^https:","wss:")
                         +"/realtime/v1/websocket?apikey="+BuildConfig.SUPABASE_ANON_KEY+"&vsn=1.0.0";
-                socket=http.newWebSocket(new Request.Builder().url(url).build(),new WebSocketListener(){
+                socket=sockets.newWebSocket(new Request.Builder().url(url).build(),new WebSocketListener(){
                     @Override public void onOpen(WebSocket ws,Response response){main.post(()->{
                         if(current!=generation||!running){ws.cancel();return;}
                         socket=ws;send(topic,"phx_join",joinPayload(api.userId(),token));
@@ -70,7 +73,7 @@ final class RealtimeConnection {
             JSONObject message=new JSONObject(text);String event=message.optString("event");
             if("phx_reply".equals(event)){
                 if(message.optString("ref").equals(heartbeatRef)){heartbeatRef=null;return;}
-                if(topic.equals(message.optString("topic"))&&!joined){
+                if(topic.equals(message.optString("topic"))&&message.optString("ref").equals(joinRef)&&!joined){
                     if(!"ok".equals(message.getJSONObject("payload").optString("status"))){disconnected(current);return;}
                     joined=true;attempt=0;main.removeCallbacks(joinTimeout);main.post(heartbeat);
                     listener.onChange("all"); // Catch up after a network gap before listening for more events.
@@ -90,7 +93,9 @@ final class RealtimeConnection {
     }
     private String send(String destination,String event,JSONObject payload) {
         String next=Integer.toString(++ref);
-        if(socket!=null)socket.send(SupabaseClient.json("topic",destination,"event",event,"payload",payload,"ref",next).toString());
+        if("phx_join".equals(event))joinRef=next;
+        if(socket!=null)socket.send(SupabaseClient.json("topic",destination,"event",event,"payload",payload,"ref",next,
+            "join_ref","phoenix".equals(destination)?JSONObject.NULL:joinRef).toString());
         return next;
     }
     private void disconnected(int current) {
